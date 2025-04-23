@@ -1,3 +1,23 @@
+// Add Telegram WebApp interface
+interface TelegramWebApp {
+    ready: () => void;
+    expand: () => void;
+    initDataUnsafe?: {
+        user?: {
+            id: number;
+            first_name: string;
+            last_name?: string;
+            username?: string;
+        };
+    };
+}
+
+interface Window {
+    Telegram?: {
+        WebApp: TelegramWebApp;
+    };
+}
+
 import { Player, PlayerStats } from './player';
 import { AudioManager } from './audio';
 import { Projectile } from './projectile';
@@ -53,6 +73,14 @@ class Game {
     private levelCompleted: boolean = false;
 
     constructor() {
+        // Initialize Telegram Web App if available
+        const telegramObj = window as any;
+        if (telegramObj.Telegram && telegramObj.Telegram.WebApp) {
+            const tg = telegramObj.Telegram.WebApp;
+            tg.ready();
+            tg.expand();
+        }
+        
         this.canvas = document.getElementById('gameCanvas') as HTMLCanvasElement;
         const context = this.canvas.getContext('2d');
         if (!context) {
