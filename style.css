@@ -1,0 +1,15 @@
+body {
+    margin: 0;
+    overflow: hidden; /* Prevent scrollbars */
+    background-color: #111; /* Dark background */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+}
+
+canvas {
+    display: block;
+    background-color: #000; /* Black canvas */
+    /* Width and height will be set dynamically */
+} 
