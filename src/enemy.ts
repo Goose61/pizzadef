@@ -1,6 +1,8 @@
 import { AssetManager } from './assetManager';
 import { Player } from './player';
 import { Projectile } from './projectile';
+import { ItemType } from './items'; // Import ItemType
+import { AudioManager } from './audio'; // Import AudioManager
 
 export enum EnemyType {
     HotDog = 'HotDog',
@@ -10,6 +12,9 @@ export enum EnemyType {
     Mochi = 'Mochi',
     Taco = 'Taco' // Boss
 }
+
+// Callback type for spawning items
+type SpawnItemCallback = (type: ItemType, x: number, y: number) => void;
 
 // Base class for all enemies
 export abstract class Enemy {
@@ -24,6 +29,12 @@ export abstract class Enemy {
     isActive: boolean = true;
     abstract type: EnemyType;
     protected assetManager: AssetManager;
+    protected spawnItemCallback: SpawnItemCallback;
+    protected audioManager: AudioManager; // Added audio manager
+    
+    // Hit flash effect
+    private hitTimer: number = 0;
+    private readonly hitDuration: number = 0.15; // Shorter flash for enemies
 
     constructor(
         x: number,
@@ -33,7 +44,9 @@ export abstract class Enemy {
         hp: number,
         speed: number,
         assetManager: AssetManager,
-        imageName: string
+        imageName: string,
+        spawnItemCallback: SpawnItemCallback,
+        audioManager: AudioManager // Added audio manager parameter
     ) {
         this.x = x;
         this.y = y;
@@ -43,16 +56,37 @@ export abstract class Enemy {
         this.maxHp = hp;
         this.speed = speed;
         this.assetManager = assetManager;
+        this.spawnItemCallback = spawnItemCallback;
+        this.audioManager = audioManager; // Store audio manager
         this.image = this.assetManager.getImage(imageName) || null;
         if (!this.image) {
              console.error(`Failed to get image "${imageName}" for enemy type ${this.constructor.name}`);
         }
     }
 
-    // Abstract methods to be implemented by subclasses
-    abstract update(deltaTime: number, canvasWidth: number, canvasHeight: number): void;
+    // Updated update method to handle hit timer
+    update(deltaTime: number, canvasWidth: number, canvasHeight: number): void {
+         if (this.hitTimer > 0) {
+            this.hitTimer -= deltaTime;
+        }
+        // Specific enemy movement logic implemented in subclasses
+        this.move(deltaTime, canvasWidth, canvasHeight); 
+    }
+    
+    // Abstract move method to be implemented by subclasses
+    abstract move(deltaTime: number, canvasWidth: number, canvasHeight: number): void;
+
+    // Updated draw method to handle hit flash
     draw(ctx: CanvasRenderingContext2D): void {
         if (!this.isActive || !this.image) return;
+        
+        ctx.save();
+        let alpha = 1.0;
+        if (this.hitTimer > 0) {
+             // Flicker effect
+            alpha = (Math.sin(Date.now() / 40) > 0) ? 0.4 : 1.0;
+        }
+        ctx.globalAlpha = alpha;
 
         ctx.drawImage(
             this.image,
@@ -62,26 +96,53 @@ export abstract class Enemy {
             this.height
         );
 
+        ctx.restore(); // Restore alpha before drawing health bar
+
+        // Draw health bar (only if HP < maxHP)
+        if (this.hp < this.maxHp) {
         const barHeight = 5;
         const barYOffset = this.height / 2 + 2;
         ctx.fillStyle = 'red';
         ctx.fillRect(this.x - this.width / 2, this.y + barYOffset, this.width, barHeight);
         ctx.fillStyle = 'green';
         ctx.fillRect(this.x - this.width / 2, this.y + barYOffset, this.width * (this.hp / this.maxHp), barHeight);
+        }
     }
 
     takeDamage(amount: number): void {
+        if (!this.isAlive()) return; 
+        
         this.hp -= amount;
+        this.hitTimer = this.hitDuration;
+        
         if (this.hp <= 0) {
             this.hp = 0;
             this.isActive = false;
             console.log(`${this.type} destroyed!`);
-            // TODO: Play enemy destroy sound
-            // TODO: Add score
-            // TODO: Potentially spawn power-up or debris
+            // Play specific explosion based on enemy type
+            const destroySound = this instanceof TacoEnemy ? 'explosion-large' : 'explosion-small';
+            this.audioManager.playSound(destroySound);
+            this.trySpawnDrops();
         } else {
             console.log(`${this.type} took ${amount} damage, ${this.hp}/${this.maxHp} HP left`);
-            // TODO: Play enemy hit sound
+            this.audioManager.playSound('enemy-hit'); // Correct name
+        }
+    }
+
+    // Method to handle spawning drops upon death
+    protected trySpawnDrops(): void {
+        // Base 5% chance for health drop for all enemies
+        if (Math.random() < 0.05) { 
+            this.spawnItemCallback(ItemType.Health, this.x, this.y);
+            console.log(`${this.type} dropped health!`);
+        }
+        
+        // Add chances for temporary power-ups (Example: 2% chance)
+        const tempPowerUpChance = 0.02;
+        if (Math.random() < tempPowerUpChance) {
+             const boostType = Math.random() < 0.5 ? ItemType.TempFireRate : ItemType.TempDamage;
+             this.spawnItemCallback(boostType, this.x, this.y);
+             console.log(`${this.type} dropped ${boostType}!`);
         }
     }
 
@@ -95,60 +156,41 @@ export abstract class Enemy {
 export class HotDogEnemy extends Enemy {
     type = EnemyType.HotDog;
 
-    constructor(x: number, y: number, assetManager: AssetManager) {
+    constructor(x: number, y: number, assetManager: AssetManager, spawnItemCallback: SpawnItemCallback, audioManager: AudioManager) {
         const imageName = 'hotdog';
         const width = 50; // Use fixed width
         const height = 50; // Change to 1:1 ratio
         const hp = 1;
         const speed = 100;
-        super(x, y, width, height, hp, speed, assetManager, imageName);
+        super(x, y, width, height, hp, speed, assetManager, imageName, spawnItemCallback, audioManager);
     }
 
-    update(deltaTime: number, canvasWidth: number, canvasHeight: number): void {
+    move(deltaTime: number, canvasWidth: number, canvasHeight: number): void {
         if (!this.isActive) return;
         this.y += this.speed * deltaTime;
         if (this.y > canvasHeight + this.height / 2) {
-            this.isActive = false;
+            this.y = -this.height / 2;
         }
-    }
-
-    draw(ctx: CanvasRenderingContext2D): void {
-        if (!this.isActive || !this.image) return;
-
-        ctx.drawImage(
-            this.image,
-            this.x - this.width / 2,
-            this.y - this.height / 2,
-            this.width,
-            this.height
-        );
-
-        const barHeight = 5;
-        const barYOffset = this.height / 2 + 2;
-        ctx.fillStyle = 'red';
-        ctx.fillRect(this.x - this.width / 2, this.y + barYOffset, this.width, barHeight);
-        ctx.fillStyle = 'green';
-        ctx.fillRect(this.x - this.width / 2, this.y + barYOffset, this.width * (this.hp / this.maxHp), barHeight);
     }
 }
 
 export class FrenchFriesEnemy extends Enemy {
     type = EnemyType.FrenchFries;
 
-    constructor(x: number, y: number, assetManager: AssetManager) {
+    constructor(x: number, y: number, assetManager: AssetManager, spawnItemCallback: SpawnItemCallback, audioManager: AudioManager) {
         const width = 40; // Adjust size
         const height = 50;
         const hp = 2; // Uncommon
         const speed = 120;
         const imageName = 'frenchFries';
-        super(x, y, width, height, hp, speed, assetManager, imageName);
+        super(x, y, width, height, hp, speed, assetManager, imageName, spawnItemCallback, audioManager);
     }
 
-    update(deltaTime: number, canvasWidth: number, canvasHeight: number): void {
+    move(deltaTime: number, canvasWidth: number, canvasHeight: number): void {
         if (!this.isActive) return;
         this.y += this.speed * deltaTime;
         if (this.y > canvasHeight + this.height / 2) {
-            this.isActive = false;
+            this.y = -this.height / 2;
         }
     }
 }
@@ -156,21 +198,20 @@ export class FrenchFriesEnemy extends Enemy {
 export class DonutEnemy extends Enemy {
     type = EnemyType.Donut;
 
-    constructor(x: number, y: number, assetManager: AssetManager) {
+    constructor(x: number, y: number, assetManager: AssetManager, spawnItemCallback: SpawnItemCallback, audioManager: AudioManager) {
         const width = 50; // Adjust size
         const height = 50;
         const hp = 3; // Rare
         const speed = 80;
         const imageName = 'donut';
-        super(x, y, width, height, hp, speed, assetManager, imageName);
+        super(x, y, width, height, hp, speed, assetManager, imageName, spawnItemCallback, audioManager);
     }
 
-    update(deltaTime: number, canvasWidth: number, canvasHeight: number): void {
+    move(deltaTime: number, canvasWidth: number, canvasHeight: number): void {
         if (!this.isActive) return;
         this.y += this.speed * deltaTime;
-        // Maybe add a slight side-to-side movement later?
         if (this.y > canvasHeight + this.height / 2) {
-            this.isActive = false;
+            this.y = -this.height / 2;
         }
     }
 }
@@ -178,20 +219,20 @@ export class DonutEnemy extends Enemy {
 export class HamburgerEnemy extends Enemy {
     type = EnemyType.Hamburger;
 
-    constructor(x: number, y: number, assetManager: AssetManager) {
+    constructor(x: number, y: number, assetManager: AssetManager, spawnItemCallback: SpawnItemCallback, audioManager: AudioManager) {
         const width = 60; // Adjust size
         const height = 55;
         const hp = 5; // Exotic
         const speed = 60;
         const imageName = 'hamburger';
-        super(x, y, width, height, hp, speed, assetManager, imageName);
+        super(x, y, width, height, hp, speed, assetManager, imageName, spawnItemCallback, audioManager);
     }
 
-    update(deltaTime: number, canvasWidth: number, canvasHeight: number): void {
+    move(deltaTime: number, canvasWidth: number, canvasHeight: number): void {
         if (!this.isActive) return;
         this.y += this.speed * deltaTime;
         if (this.y > canvasHeight + this.height / 2) {
-            this.isActive = false;
+            this.y = -this.height / 2;
         }
     }
 }
@@ -216,13 +257,15 @@ export class TacoEnemy extends Enemy {
         hp: number,
         assetManager: AssetManager,
         addProjectileCallback: (x: number, y: number, isPlayerProjectile: boolean, angle: number) => void,
+        spawnItemCallback: SpawnItemCallback,
+        audioManager: AudioManager, // Added audio manager
         playerRef: Player
     ) {
         const width = 80;
         const height = 65;
         const speed = 150;
         const imageName = 'taco';
-        super(x, y, width, height, hp, speed, assetManager, imageName);
+        super(x, y, width, height, hp, speed, assetManager, imageName, spawnItemCallback, audioManager); // Pass audio manager to super
 
         this.addProjectileCallback = addProjectileCallback;
         this.playerRef = playerRef;
@@ -241,7 +284,7 @@ export class TacoEnemy extends Enemy {
         return Math.max(0.5, this.baseShootInterval - hpDifficultyBonus * 0.2);
     }
 
-    update(deltaTime: number, canvasWidth: number, canvasHeight: number): void {
+    move(deltaTime: number, canvasWidth: number, canvasHeight: number): void {
         if (!this.isActive || !this.isAlive()) return;
 
         // Update movement change timer
@@ -300,6 +343,16 @@ export class TacoEnemy extends Enemy {
             // Add a small variation to shoot interval
             this.shootTimer = this.getShootInterval() * (Math.random() * 0.4 + 0.8); // 0.8x to 1.2x variation
         }
+    }
+
+    // Override trySpawnDrops for the Boss
+    protected trySpawnDrops(): void {
+        // Always drop the Pizza Change power-up
+        this.spawnItemCallback(ItemType.PizzaChange, this.x, this.y);
+        console.log("Taco Boss dropped Pizza Change power-up!");
+        
+        // Optionally, still give a chance for health or temp boosts as well?
+        // super.trySpawnDrops(); // Call base method for chance of health/temp boost
     }
 }
 

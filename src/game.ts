@@ -24,6 +24,8 @@ import { Projectile } from './projectile';
 import { Enemy, EnemyType, HotDogEnemy, FrenchFriesEnemy, DonutEnemy, HamburgerEnemy, TacoEnemy } from './enemy';
 import { AssetManager } from './assetManager';
 import { levelConfig, WaveConfig, WaveEnemyConfig, BOSS_LEVEL_INTERVAL } from './LevelConfig'; // Import level config
+import { Item, ItemType } from './items'; // Import Item and ItemType
+import { PizzaType } from './player'; // Import PizzaType
 
 // Enum for game states
 enum GameState {
@@ -43,6 +45,7 @@ class Game {
     private audioManager: AudioManager;
     private projectiles: Projectile[] = [];
     private enemies: Enemy[] = [];
+    private items: Item[] = []; // Added array for items
     private assetManager: AssetManager;
     private assetsLoaded: boolean = false;
     private gameState: GameState = GameState.Loading;
@@ -90,11 +93,8 @@ class Game {
         this.audioManager = new AudioManager();
         this.assetManager = new AssetManager();
 
-        this.assetManager.queueImage('hotdog', 'assets/hotdog.png');
-        this.assetManager.queueImage('frenchFries', 'assets/french-fries.png');
-        this.assetManager.queueImage('donut', 'assets/donut.png');
-        this.assetManager.queueImage('hamburger', 'assets/hamburger.png');
-        this.assetManager.queueImage('taco', 'assets/taco.png');
+        // Queue all assets (including sounds)
+        this.queueAssets();
 
         this.resizeCanvas();
 
@@ -103,22 +103,79 @@ class Game {
             this.canvas.height - 60,
             this.canvas,
             this.audioManager,
-            (x, y) => this.addProjectile(x, y, true, -Math.PI / 2)
+            this.assetManager,
+            this.addProjectile.bind(this)
         );
 
         window.addEventListener('resize', this.resizeCanvas.bind(this));
         
         // Add click handler for upgrade buttons
         this.canvas.addEventListener('click', this.handleCanvasClick.bind(this));
+        // Add touch handler for upgrade buttons
+        this.canvas.addEventListener('touchstart', this.handleCanvasTouch.bind(this), { passive: false }); // Added touch listener
 
         this.gameLoop = this.gameLoop.bind(this);
         this.spawnEnemy = this.spawnEnemy.bind(this);
         this.spawnBoss = this.spawnBoss.bind(this);
         this.addProjectile = this.addProjectile.bind(this);
         this.addEnemyProjectile = this.addEnemyProjectile.bind(this);
+        this.spawnItem = this.spawnItem.bind(this); // Bind spawnItem
         
         // Set up upgrade buttons
         this.setupUpgradeButtons();
+    }
+    
+    private queueAssets(): void {
+        // Player Pizza Sprites
+        this.assetManager.queueImage('pizza-plain', 'assets/plain.png');
+        this.assetManager.queueImage('pizza-pepperoni', 'assets/pepperoni.png');
+        this.assetManager.queueImage('pizza-hawaiian', 'assets/hawaiian.png');
+        this.assetManager.queueImage('pizza-vegetarian', 'assets/vegetarian.png');
+        this.assetManager.queueImage('pizza-meatlovers', 'assets/meatlover.png');
+        
+        // Enemy Sprites
+        this.assetManager.queueImage('hotdog', 'assets/hotdog.png');
+        this.assetManager.queueImage('frenchFries', 'assets/french-fries.png');
+        this.assetManager.queueImage('donut', 'assets/donut.png');
+        this.assetManager.queueImage('hamburger', 'assets/hamburger.png');
+        this.assetManager.queueImage('taco', 'assets/taco.png');
+        
+        // Item/PowerUp Sprites
+        this.assetManager.queueImage('item-health', 'assets/item-health.png');
+        this.assetManager.queueImage('powerup-pizzachange', 'assets/powerup-pizzachange.png');
+        this.assetManager.queueImage('powerup-firerate', 'assets/powerup-firerate.png');
+        this.assetManager.queueImage('powerup-damage', 'assets/powerup-damage.png');
+        
+        // Audio Assets
+        // SFX
+        this.audioManager.loadSound('fire', 'assets/sounds/fire.mp3'); 
+        this.audioManager.loadSound('player-hit', 'assets/sounds/player-hit.mp3');
+        this.audioManager.loadSound('enemy-hit', 'assets/sounds/enemy-hit.mp3');
+        this.audioManager.loadSound('explosion-small', 'assets/sounds/explosion-small.mp3');
+        this.audioManager.loadSound('explosion-large', 'assets/sounds/explosion-large.mp3');
+        this.audioManager.loadSound('health', 'assets/sounds/health.mp3');
+        this.audioManager.loadSound('game-over', 'assets/sounds/game-over.mp3');
+        // Renamed boost/change sounds
+        this.audioManager.loadSound('boost-activate', 'assets/sounds/power-up.mp3'); // Changed from boost-start
+        this.audioManager.loadSound('boost-expire', 'assets/sounds/boost_end.mp3'); // Corrected filename (underscore)
+        this.audioManager.loadSound('ship-change', 'assets/sounds/level-up.mp3'); // Changed from level-up
+        this.audioManager.loadSound('upgrade-selected', 'assets/sounds/upgrade.mp3'); // Added upgrade click sound
+        
+        // Background Music Tracks
+        this.audioManager.loadMusicTrack('assets/sounds/track1.mp3');
+        this.audioManager.loadMusicTrack('assets/sounds/track2.mp3');
+        this.audioManager.loadMusicTrack('assets/sounds/track3.mp3');
+        this.audioManager.loadMusicTrack('assets/sounds/track4.mp3');
+        this.audioManager.loadMusicTrack('assets/sounds/track5.mp3');
+        
+        // Upgrade Menu Music Tracks
+        this.audioManager.loadUpgradeMusicTrack('assets/sounds/upgrade-menu1.mp3');
+        this.audioManager.loadUpgradeMusicTrack('assets/sounds/upgrade-menu2.mp3');
+        this.audioManager.loadUpgradeMusicTrack('assets/sounds/upgrade-menu3.mp3');
+        this.audioManager.loadUpgradeMusicTrack('assets/sounds/upgrade-menu4.mp3');
+        this.audioManager.loadUpgradeMusicTrack('assets/sounds/upgrade-menu5.mp3');
+        this.audioManager.loadUpgradeMusicTrack('assets/sounds/upgrade-menu6.mp3');
+        this.audioManager.loadUpgradeMusicTrack('assets/sounds/upgrade-menu7.mp3');
     }
     
     private setupUpgradeButtons(): void {
@@ -164,20 +221,48 @@ class Game {
         const x = event.clientX - rect.left;
         const y = event.clientY - rect.top;
         
-        // Check if click is on any of the upgrade buttons
+        this.processUpgradeSelection(x, y); // Refactored logic
+    }
+
+    // New handler for touch events
+    private handleCanvasTouch(event: TouchEvent): void {
+        // Only process touches in UpgradingStats state
+        if (this.gameState !== GameState.UpgradingStats) return;
+
+        event.preventDefault(); // Prevent default touch behavior (like scrolling)
+        const touch = event.touches[0]; // Get the first touch point
+        if (touch) {
+            const rect = this.canvas.getBoundingClientRect();
+            const x = touch.clientX - rect.left;
+            const y = touch.clientY - rect.top;
+            this.processUpgradeSelection(x, y); // Use the same refactored logic
+        }
+    }
+
+    // Refactored logic for processing clicks or touches on upgrade buttons
+    private processUpgradeSelection(x: number, y: number): void {
+        // Check if click/touch is on any of the upgrade buttons
         for (const button of this.upgradeButtons) {
             if (
-                x >= button.x && 
+                x >= button.x &&
                 x <= button.x + button.width &&
-                y >= button.y && 
+                y >= button.y &&
                 y <= button.y + button.height
             ) {
+                // Play upgrade confirmation sound
+                this.audioManager.playSound('upgrade-selected');
+                
                 // Log state before upgrade
                 this.logGameState("Before Upgrade");
                 
                 // Upgrade the selected stat
                 this.player.upgradeStat(button.statType);
                 
+                // Stop upgrade menu music 
+                this.audioManager.stopUpgradeMusic(); 
+                // Resume background music
+                this.audioManager.resumeBackgroundMusic();
+
                 // Store the level we're currently on
                 const currentLevel = this.currentLevelNumber;
                 
@@ -209,6 +294,7 @@ class Game {
                     // We reached the end of the game
                     console.log("All waves completed! Game Won!");
                     this.gameState = GameState.GameWon;
+                    this.audioManager.stopBackgroundMusic(); // Stop music on win
                     return;
                 }
                 
@@ -300,47 +386,48 @@ class Game {
                 break;
                 
             case GameState.UpgradingStats:
-                // No updates needed, waiting for player to select an upgrade
+                // Music is paused/stopped via state transition
                 break;
 
             case GameState.GameOver:
             case GameState.GameWon:
-                // No updates needed for static end screens
+                // Music stopped via state transition
                 break;
         }
     }
 
     private updateRunning(deltaTime: number): void {
-        // If no wave config loaded (shouldn't happen in Running state), return
-        if (!this.currentWave) {
-            console.error("Attempting to run game logic without a current wave loaded.");
-            this.gameState = GameState.GameOver; // Fail safe
-            return;
-        }
-
+        // Update player
         this.player.update(deltaTime);
 
-        this.projectiles.forEach(projectile => projectile.update(deltaTime, this.canvas.width, this.canvas.height));
-        this.projectiles = this.projectiles.filter(projectile => projectile.isActive);
+        // Update projectiles
+        this.projectiles.forEach(p => p.update(deltaTime, this.canvas.width, this.canvas.height));
+        this.projectiles = this.projectiles.filter(p => p.isActive);
 
-        this.enemies.forEach(enemy => enemy.update(deltaTime, this.canvas.width, this.canvas.height));
-        this.enemies = this.enemies.filter(enemy => enemy.isActive);
+        // Update enemies
+        this.enemies.forEach(e => e.update(deltaTime, this.canvas.width, this.canvas.height));
+        this.enemies = this.enemies.filter(e => e.isActive);
 
-        // Enemy Spawning Logic (moved from old update)
-        if (this.currentWave && !this.currentWave.isBossWave) {
-            // Use a timer specific to spawning, reset when needed
-            this.enemySpawnTimer -= deltaTime;
-            if (this.enemySpawnTimer <= 0 && this.enemiesSpawnedThisWave < this.totalEnemiesThisWave) {
-                this.spawnEnemy();
-                // Reset timer based on the current wave's interval
-                this.enemySpawnTimer = this.currentWave.spawnInterval;
-            }
-        }
+        // Update items
+        this.items.forEach(i => i.update(deltaTime, this.canvas.height));
+        this.items = this.items.filter(i => i.isActive);
 
+        // Check collisions
         this.checkCollisions();
+
+        // Spawn new enemies if needed
+        this.spawnEnemy();
 
         // Check for wave completion
         this.checkWaveCompletion();
+        
+        // Check for game over
+        if (!this.player.isAlive()) {
+            this.gameState = GameState.GameOver;
+            this.audioManager.stopBackgroundMusic(); // Stop music
+            this.audioManager.playSound('game-over'); // Play game over sound
+            console.log("Game Over!");
+        }
     }
 
     private checkWaveCompletion(): void {
@@ -354,21 +441,18 @@ class Game {
         if (bossDefeated || regularWaveComplete) {
             console.log(`Wave ${this.currentWave.waveNumber} Complete!`);
             
-            // Check if this is the last wave in a level
             const isLastWaveInLevel = this.currentWave.waveInLevel === 
                 (this.currentWave.levelNumber % BOSS_LEVEL_INTERVAL === 0 ? 3 : 2);
             
-            // Only set levelCompleted flag if this is actually the last wave in the level
             if (isLastWaveInLevel) {
                 console.log(`Level ${this.currentWave.levelNumber} completed! Showing upgrade screen.`);
                 this.levelCompleted = true;
                 this.gameState = GameState.UpgradingStats;
-                
-                // Don't increment the wave index yet - we'll do that after upgrade selection
-                // in the handleCanvasClick method
+                this.audioManager.pauseBackgroundMusic(); // Pause gameplay music
+                this.audioManager.playUpgradeMusic(); // Play upgrade menu music playlist
             } else {
                 console.log(`Wave ${this.currentWave.waveNumber} completed, but not the last wave in level. Moving to next wave.`);
-                this.prepareForNextSequence(); // Prepare for next wave in the same level
+                this.prepareForNextSequence();
             }
         }
     }
@@ -388,6 +472,8 @@ class Game {
         if (this.currentWaveIndex >= levelConfig.length) {
             console.log("All waves completed! Game Won!");
             this.gameState = GameState.GameWon;
+             this.audioManager.stopBackgroundMusic(); // Stop music on win
+            // TODO: Play game won sound?
             return;
         }
 
@@ -412,178 +498,213 @@ class Game {
     }
 
     private checkCollisions(): void {
-        // Check projectile collisions with enemies
-        this.projectiles.forEach(projectile => {
-            if (!projectile.isActive || !projectile.isPlayerProjectile) return;
+        // Projectile vs Enemy collisions
+        this.projectiles.forEach(proj => {
+            if (!proj.isActive || !proj.isPlayerProjectile) return;
 
             this.enemies.forEach(enemy => {
-                // Only check active enemies that are alive
                 if (!enemy.isActive || !enemy.isAlive()) return;
 
-                const projLeft = projectile.x - projectile.radius;
-                const projRight = projectile.x + projectile.radius;
-                const projTop = projectile.y - projectile.radius;
-                const projBottom = projectile.y + projectile.radius;
+                // AABB collision check (using radius for projectile)
+                const projLeft = proj.x - proj.radius;
+                const projRight = proj.x + proj.radius;
+                const projTop = proj.y - proj.radius;
+                const projBottom = proj.y + proj.radius;
 
                 const enemyLeft = enemy.x - enemy.width / 2;
                 const enemyRight = enemy.x + enemy.width / 2;
                 const enemyTop = enemy.y - enemy.height / 2;
                 const enemyBottom = enemy.y + enemy.height / 2;
 
-                // Check for collision
-                if (projRight > enemyLeft && projLeft < enemyRight && projBottom > enemyTop && projTop < enemyBottom) {
-                    enemy.takeDamage(projectile.damage); // Use projectile damage
-                    projectile.isActive = false; // Deactivate projectile
-                    this.audioManager.playSound('enemyHit');
-
-                    // Check if enemy was destroyed by projectile
-                    if (!enemy.isAlive()) {
-                        this.audioManager.playSound('enemyDestroy');
-                        // TODO: Add score increase here
-                    }
+                if (
+                    projRight > enemyLeft &&
+                    projLeft < enemyRight &&
+                    projBottom > enemyTop &&
+                    projTop < enemyBottom
+                ) {
+                    enemy.takeDamage(proj.damage); // Use projectile's damage property
+                    proj.isActive = false; // Deactivate projectile on hit
+                    // TODO: Add hit effect/sound
                 }
             });
         });
 
-        // Check enemy projectile collisions with player
-        this.projectiles.forEach(projectile => {
-            if (!projectile.isActive || projectile.isPlayerProjectile || !this.player.isAlive()) return;
-
-            const projLeft = projectile.x - projectile.radius;
-            const projRight = projectile.x + projectile.radius;
-            const projTop = projectile.y - projectile.radius;
-            const projBottom = projectile.y + projectile.radius;
-
-            const playerLeft = this.player.x - this.player.width / 2;
-            const playerRight = this.player.x + this.player.width / 2;
-            const playerTop = this.player.y - this.player.height / 2;
-            const playerBottom = this.player.y + this.player.height / 2;
-
-            // Check for collision
-            if (projRight > playerLeft && projLeft < playerRight && projBottom > playerTop && projTop < playerBottom) {
-                this.player.takeDamage(projectile.damage); // Apply damage to player
-                projectile.isActive = false; // Deactivate projectile
-                this.audioManager.playSound('playerHit');
-
-                // Check if player died
-                if (!this.player.isAlive()) {
-                    console.log("Player defeated! Game Over.");
-                    this.gameState = GameState.GameOver;
-                    this.audioManager.playSound('playerDefeat');
-                }
-            }
-        });
-
-        // Check collisions between enemies and player (direct hit)
+        // Player vs Enemy collisions
         this.enemies.forEach(enemy => {
-            if (!enemy.isActive || !enemy.isAlive() || !this.player.isAlive()) return;
+            if (!enemy.isActive || !enemy.isAlive()) return;
 
-            const enemyLeft = enemy.x - enemy.width / 2;
-            const enemyRight = enemy.x + enemy.width / 2;
-            const enemyTop = enemy.y - enemy.height / 2;
-            const enemyBottom = enemy.y + enemy.height / 2;
+            // Simple AABB collision check (using player width/height)
+            if (
+                this.player.x < enemy.x + enemy.width / 2 &&
+                this.player.x + this.player.width / 2 > enemy.x - enemy.width / 2 &&
+                this.player.y < enemy.y + enemy.height / 2 &&
+                this.player.y + this.player.height / 2 > enemy.y - enemy.height / 2
+            ) {
+                // Damage player (e.g., 1 damage per collision)
+                this.player.takeDamage(1);
+                // Optionally damage/destroy enemy too, or bounce back
+                enemy.takeDamage(1); // Example: Enemy also takes damage
+                 console.log("Collision between player and enemy!");
+                // TODO: Add collision effect/sound
+            }
+        });
+
+        // Player vs Item collisions
+        this.items.forEach(item => {
+            if (!item.isActive) return;
+
+            // Simple AABB collision check
+             if (
+                this.player.x < item.x + item.width / 2 &&
+                this.player.x + this.player.width / 2 > item.x - item.width / 2 &&
+                this.player.y < item.y + item.height / 2 &&
+                this.player.y + this.player.height / 2 > item.y - item.height / 2
+            ) {
+                this.collectItem(item);
+                item.isActive = false; // Deactivate item on collect
+            }
+        });
+        
+         // Enemy Projectile vs Player collisions
+        this.projectiles.forEach(proj => {
+            if (!proj.isActive || proj.isPlayerProjectile) return;
+
+            // AABB collision check (using radius for projectile)
+            const projLeft = proj.x - proj.radius;
+            const projRight = proj.x + proj.radius;
+            const projTop = proj.y - proj.radius;
+            const projBottom = proj.y + proj.radius;
 
             const playerLeft = this.player.x - this.player.width / 2;
             const playerRight = this.player.x + this.player.width / 2;
             const playerTop = this.player.y - this.player.height / 2;
             const playerBottom = this.player.y + this.player.height / 2;
 
-            // Check for collision
-            if (enemyRight > playerLeft && enemyLeft < playerRight && enemyBottom > playerTop && enemyTop < playerBottom) {
-                enemy.isActive = false; // Deactivate enemy on collision
-                this.player.takeDamage(1); // Player takes 1 damage
-                this.audioManager.playSound('playerHit');
-
-                // Check if player died
-                if (!this.player.isAlive()) {
-                    console.log("Player defeated! Game Over.");
-                    this.gameState = GameState.GameOver;
-                    this.audioManager.playSound('playerDefeat');
-                }
+            if (
+                projRight > playerLeft &&
+                projLeft < playerRight &&
+                projBottom > playerTop &&
+                projTop < playerBottom
+            ) {
+                this.player.takeDamage(proj.damage); // Use projectile's damage
+                proj.isActive = false; // Deactivate projectile on hit
+                console.log("Player hit by enemy projectile!");
+                // TODO: Add hit effect/sound
             }
         });
+    }
+    
+    // Handle collecting an item
+    private collectItem(item: Item): void {
+        console.log(`Collected item: ${item.type}`);
+        let playSound = true;
+        switch (item.type) {
+            case ItemType.Health:
+                this.player.heal(1); // Heal handles its own sound check now
+                playSound = false; // Don't play generic collect sound for health
+                break;
+            case ItemType.PizzaChange:
+                 const nextPizzaType = this.getRandomPizzaType();
+                 this.player.changeShip(nextPizzaType); // ChangeShip plays its own sound
+                 playSound = false;
+                 break;
+            case ItemType.TempFireRate:
+                 this.player.activateTempFireRate(10); // Plays boost-activate sound
+                 playSound = false;
+                 break;
+            case ItemType.TempDamage:
+                 this.player.activateTempDamage(10); // Plays boost-activate sound
+                 playSound = false;
+                 break;
+        }
+        if (playSound) {
+             this.audioManager.playSound('collect-item'); // Fallback sound
+        }
+    }
+    
+    // Helper to get a random pizza type (excluding Plain)
+    private getRandomPizzaType(): PizzaType {
+        const types = [PizzaType.Pepperoni, PizzaType.Hawaiian, PizzaType.Vegetarian, PizzaType.Meatlovers];
+        // Avoid giving the same type player currently has, if possible
+         const currentType = this.player.shipType;
+         const availableTypes = types.filter(t => t !== currentType);
+         if (availableTypes.length > 0) {
+            return availableTypes[Math.floor(Math.random() * availableTypes.length)];
+         } else {
+             // Fallback if somehow player has all types (or only Plain is left)
+             return types[Math.floor(Math.random() * types.length)];
+                }
     }
 
     private spawnEnemy(): void {
         if (!this.currentWave || this.currentWave.isBossWave) return;
 
-        // Get the list of enemies for the current wave
-        const waveEnemies = this.currentWave.enemies;
+        this.enemySpawnTimer -= 1 / 60; // Assuming 60 FPS for deltaTime approximation
+        if (this.enemySpawnTimer <= 0 && this.enemiesSpawnedThisWave < this.totalEnemiesThisWave) {
+            // Determine which enemy to spawn based on wave config
+            let cumulativeCount = 0;
+            const enemyConfig = this.currentWave.enemies.find(ec => {
+                cumulativeCount += ec.count;
+                return this.enemiesSpawnedThisWave < cumulativeCount;
+            });
 
-        // Calculate remaining enemies to choose from
-        let availableToSpawn: WaveEnemyConfig[] = [];
-        let currentSpawnCounts: { [key in EnemyType]?: number } = {};
-        this.enemies.forEach(e => {
-            if (e.type !== EnemyType.Taco) { // Don't count boss in spawn counts if it exists
-                 currentSpawnCounts[e.type] = (currentSpawnCounts[e.type] || 0) + 1;
-            }
-        });
-        // Need to count enemies previously spawned this wave but now destroyed
-        // This simple logic assumes we just pick randomly from the wave list until total is reached
-        // A better approach would track counts per type precisely.
-
-        // Simple random selection from the wave's enemy types for now:
-        if (waveEnemies.length > 0) {
-            const spawnPadding = 60;
-            const x = Math.random() * (this.canvas.width - spawnPadding * 2) + spawnPadding;
-            const y = -50; // Start off-screen top
-
-            const randomIndex = Math.floor(Math.random() * waveEnemies.length);
-            const typeToSpawn = waveEnemies[randomIndex].type; // Just pick a random type defined for the wave
-
+            if (enemyConfig) {
+                const enemyType = enemyConfig.type;
+                const spawnX = Math.random() * this.canvas.width;
+                const spawnY = -50; // Spawn above screen
             let newEnemy: Enemy | null = null;
 
-            switch (typeToSpawn) {
-                case EnemyType.HotDog: newEnemy = new HotDogEnemy(x, y, this.assetManager); break;
-                case EnemyType.FrenchFries: newEnemy = new FrenchFriesEnemy(x, y, this.assetManager); break;
-                case EnemyType.Donut: newEnemy = new DonutEnemy(x, y, this.assetManager); break;
-                case EnemyType.Hamburger: newEnemy = new HamburgerEnemy(x, y, this.assetManager); break;
-                // Bosses are spawned separately
-                case EnemyType.Taco: console.warn("Trying to spawn Taco boss via regular spawn logic?"); break;
+                switch (enemyType) {
+                    case EnemyType.HotDog:
+                        newEnemy = new HotDogEnemy(spawnX, spawnY, this.assetManager, this.spawnItem, this.audioManager);
+                        break;
+                    case EnemyType.FrenchFries:
+                        newEnemy = new FrenchFriesEnemy(spawnX, spawnY, this.assetManager, this.spawnItem, this.audioManager);
+                        break;
+                    case EnemyType.Donut:
+                        newEnemy = new DonutEnemy(spawnX, spawnY, this.assetManager, this.spawnItem, this.audioManager);
+                        break;
+                    case EnemyType.Hamburger:
+                        newEnemy = new HamburgerEnemy(spawnX, spawnY, this.assetManager, this.spawnItem, this.audioManager);
+                        break;
+                    // Bosses are spawned via spawnBoss
             }
 
             if (newEnemy) {
                 this.enemies.push(newEnemy);
                 this.enemiesSpawnedThisWave++;
-                console.log(`Spawned ${typeToSpawn} (${this.enemiesSpawnedThisWave}/${this.totalEnemiesThisWave}) for wave ${this.currentWave.waveNumber}`);
+                    this.enemySpawnTimer = this.currentWave.spawnInterval; // Reset timer
+                }
+            } else {
+                 console.error("Could not determine enemy type to spawn based on wave config");
+                 // Avoid infinite loop if config is bad
+                 this.enemiesSpawnedThisWave = this.totalEnemiesThisWave; 
             }
         }
     }
 
     private spawnBoss(bossType: EnemyType): void {
-        if (!this.currentWave || !this.currentWave.isBossWave) return;
-
-        const x = this.canvas.width / 2;
-        const y = -100;
-        let boss: Enemy | null = null;
-
-        // Boss HP Scaling (Use currentLevelNumber)
-        const baseBossHp = 50;
-        // Calculate how many boss intervals have passed (Level 5 is 1st, Level 10 is 2nd, etc.)
-        const bossLevelNum = Math.max(0, Math.floor((this.currentLevelNumber - 1) / BOSS_LEVEL_INTERVAL));
-        const scaledHp = baseBossHp + bossLevelNum * 25;
-
-        switch (bossType) {
-            case EnemyType.Taco:
-                boss = new TacoEnemy(
-                    x, y,
-                    scaledHp,
-                    this.assetManager,
-                    this.addEnemyProjectile.bind(this),
-                    this.player
-                );
-                break;
-            default:
-                console.error(`Unknown boss type specified: ${bossType}`);
+        if (bossType !== EnemyType.Taco) {
+            console.error("Attempted to spawn non-Taco boss type");
                 return;
         }
+        const spawnX = this.canvas.width / 2;
+        const spawnY = -80; // Spawn boss higher up
+        const bossHp = 50 + (this.currentLevelNumber / BOSS_LEVEL_INTERVAL) * 25; // Scale HP based on level
 
-        if (boss) {
+        const boss = new TacoEnemy(
+            spawnX,
+            spawnY,
+            bossHp,
+            this.assetManager,
+            this.addEnemyProjectile, // Pass enemy projectile callback
+            this.spawnItem, // Pass item spawn callback
+            this.audioManager, // Pass audio manager
+            this.player // Pass player reference
+        );
             this.enemies.push(boss);
-            this.enemiesSpawnedThisWave = 1;
-            this.totalEnemiesThisWave = 1;
-            console.log(`Spawned BOSS: ${bossType} (Level: ${this.currentLevelNumber}, HP: ${scaledHp}) for wave ${this.currentWave.waveNumber}`);
-        }
+        this.enemiesSpawnedThisWave++; // Boss counts as the one enemy for the wave
+         console.log(`Spawning Taco Boss with ${bossHp} HP`);
     }
 
     private startNextWave(): void {
@@ -616,6 +737,9 @@ class Game {
         
         // Set state to Running
         this.gameState = GameState.Running;
+        
+        // Start or resume background music for the running state
+        this.audioManager.playBackgroundMusic(); // AudioManager handles resuming vs starting new
 
         // Log current level and wave info for debugging
         console.log(`Starting Level ${this.currentWave.levelNumber} - Wave ${this.currentWave.waveInLevel}`);
@@ -675,12 +799,17 @@ class Game {
     }
 
     private drawRunningGame(): void {
-        // Draw background (added later potentially)
-
-        // Draw game objects
-        this.enemies.forEach(enemy => enemy.draw(this.ctx));
-        this.projectiles.forEach(projectile => projectile.draw(this.ctx));
+        // Draw player
         this.player.draw(this.ctx);
+
+        // Draw projectiles
+        this.projectiles.forEach(p => p.draw(this.ctx));
+
+        // Draw enemies
+        this.enemies.forEach(e => e.draw(this.ctx));
+
+        // Draw items
+        this.items.forEach(i => i.draw(this.ctx));
     }
     
     private drawUpgradeScreen(): void {
@@ -807,13 +936,22 @@ class Game {
         // TODO: Add score display?
     }
 
-    public addProjectile(x: number, y: number, isPlayer: boolean, angle: number): void {
-        const damage = isPlayer ? this.player.getProjectileDamage() : 1;
+    public addProjectile(x: number, y: number, angle: number, damageOverride?: number): void {
+        const isPlayer = true; // This method is only called by player
+        const damage = damageOverride ?? this.player.getProjectileDamage(); // Use override or player's current
         this.projectiles.push(new Projectile(x, y, isPlayer, angle, damage));
     }
 
     public addEnemyProjectile(x: number, y: number, isPlayer: boolean, angle: number): void {
-        this.projectiles.push(new Projectile(x, y, isPlayer, angle, 1)); // Enemy projectiles deal 1 damage
+        const damage = 1; // Standard enemy projectile damage
+        this.projectiles.push(new Projectile(x, y, isPlayer, angle, damage));
+    }
+    
+    // Method to spawn items
+    public spawnItem(type: ItemType, x: number, y: number): void {
+        const newItem = new Item(x, y, type, this.assetManager);
+        this.items.push(newItem);
+        console.log(`Spawned item ${type} at (${x.toFixed(0)}, ${y.toFixed(0)})`);
     }
 
     private resetGame(): void {
@@ -825,6 +963,7 @@ class Game {
         // Clear arrays
         this.projectiles = [];
         this.enemies = [];
+        this.items = [];
 
         // Reset timers and flags
         this.lastTime = performance.now();
@@ -837,8 +976,8 @@ class Game {
         this.enemySpawnTimer = 0; // Reset enemy spawn timer
 
         console.log("Game reset.");
-        // Immediately prepare the first sequence (Stage 1 screen)
-        this.gameState = GameState.Loading; // Temporarily set to loading until first prep
+        this.audioManager.stopBackgroundMusic(); // Stop music on reset
+        this.gameState = GameState.Loading;
         this.prepareForNextSequence();
     }
 

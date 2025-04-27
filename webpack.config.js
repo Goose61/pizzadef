@@ -37,9 +37,14 @@ module.exports = {
   ],
   devServer: {
     static: {
-        directory: path.join(__dirname, '/'), // Serve files from the root directory
+        directory: path.join(__dirname, 'dist'), // Serve files FROM the dist directory
       },
     compress: true,
     port: 9000, // Port for the development server
+    watchFiles: ['src/**/*', 'index.html', 'style.css'], 
+    hot: true // Ensure HMR is enabled
   },
+  watchOptions: {
+    ignored: /node_modules|dist/, 
+  }
 }; 
