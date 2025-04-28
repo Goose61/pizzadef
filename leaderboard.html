@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Leaderboard - Pizza Defenders</title>
+    <link rel="stylesheet" href="style.css"> <!-- Reuse main styles -->
+    <link rel="stylesheet" href="leaderboard.css"> <!-- Specific leaderboard styles -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+    <div id="leaderboardContainer">
+        <h1>Leaderboard</h1>
+        <div id="loadingMessage">Loading...</div>
+        <ol id="leaderboardList">
+            <!-- Leaderboard entries will be added here by JavaScript -->
+        </ol>
+        <button id="backButton">Back to Menu</button>
+    </div>
+    <script src="src/leaderboard.js"></script> <!-- Script to fetch and display data -->
+</body>
+</html> 

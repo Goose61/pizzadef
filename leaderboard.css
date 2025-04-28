@@ -1,0 +1,80 @@
+#leaderboardContainer {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 15px;
+    background-color: rgba(0, 0, 0, 0.8); /* Darker overlay for focus */
+    padding: 30px;
+    border-radius: 10px;
+    width: 80%;
+    max-width: 500px;
+    max-height: 80vh;
+    overflow-y: auto; /* Allow scrolling if list is long */
+}
+
+#leaderboardContainer h1 {
+    margin-bottom: 15px;
+    font-size: 2em;
+    color: #ff8c00; /* Highlight color */
+}
+
+#leaderboardList {
+    list-style: none;
+    padding: 0;
+    width: 100%;
+    color: #eee;
+}
+
+#leaderboardList li {
+    display: flex;
+    justify-content: space-between;
+    padding: 10px 15px;
+    border-bottom: 1px solid #444;
+    font-size: 1.1em;
+}
+
+#leaderboardList li:last-child {
+    border-bottom: none;
+}
+
+#leaderboardList .rank {
+    font-weight: bold;
+    color: #aaa;
+    min-width: 30px; /* Ensure alignment */
+}
+
+#leaderboardList .name {
+    flex-grow: 1;
+    margin-left: 15px;
+    margin-right: 15px;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#leaderboardList .score {
+    font-weight: bold;
+    color: #ffcc00; /* Score color */
+}
+
+#loadingMessage {
+    font-style: italic;
+    color: #aaa;
+}
+
+#backButton {
+    margin-top: 20px;
+    padding: 10px 20px;
+    font-size: 1em;
+    cursor: pointer;
+    border: none;
+    border-radius: 5px;
+    background-color: #555;
+    color: white;
+    transition: background-color 0.3s ease;
+}
+
+#backButton:hover {
+    background-color: #777;
+} 

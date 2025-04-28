@@ -1,6 +1,8 @@
 export class Projectile {
     x: number;
     y: number;
+    width: number = 10; // ADDED width
+    height: number = 10; // ADDED height
     radius: number = 5; // Small circle for the projectile
     speed: number = 400; // Pixels per second
     isActive: boolean = true;

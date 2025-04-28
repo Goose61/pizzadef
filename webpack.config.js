@@ -31,6 +31,8 @@ module.exports = {
     new CopyWebpackPlugin({
       patterns: [
         { from: 'style.css', to: 'style.css' }, // Copy style.css
+        { from: 'leaderboard.html', to: 'leaderboard.html' }, // Copy leaderboard.html
+        { from: 'leaderboard.css', to: 'leaderboard.css' }, // Copy leaderboard.css
         { from: 'assets', to: 'assets' } // Copy assets folder
       ]
     })
@@ -42,7 +44,7 @@ module.exports = {
     compress: true,
     port: 9000, // Port for the development server
     watchFiles: ['src/**/*', 'index.html', 'style.css'], 
-    hot: true // Ensure HMR is enabled
+    hot: false // Ensure HMR is enabled
   },
   watchOptions: {
     ignored: /node_modules|dist/, 

@@ -16,6 +16,7 @@ export class AssetManager {
                 img.onload = () => {
                     console.log(`Loaded asset: ${name} from ${src}`);
                     this.images.set(name, img);
+                    console.log(`>>> AssetManager: Set image for key "${name}". Map size: ${this.images.size}`);
                     resolve();
                 };
                 img.onerror = (err) => {
@@ -27,10 +28,15 @@ export class AssetManager {
             promises.push(promise);
         });
 
+        this.assetsToLoad = [];
+
         return Promise.all(promises);
     }
 
     getImage(name: string): HTMLImageElement | undefined {
+        const hasImage = this.images.has(name);
+        console.log(`>>> AssetManager: getImage called for key "${name}". Found: ${hasImage}. Map size: ${this.images.size}`);
+        
         const img = this.images.get(name);
         if (!img) {
              console.warn(`Image "${name}" not found in AssetManager. Was it loaded?`);

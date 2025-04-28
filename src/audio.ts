@@ -71,17 +71,34 @@ export class AudioManager {
         console.log(`Queued upgrade music track: ${src}`);
     }
 
-    playSound(name: string): void { // Removed loop parameter, SFX shouldn't loop typically
+    playSound(name: string): void {
         if (this.isMuted) return;
 
-        const sound = this.sounds.get(name);
-        if (sound) {
-            sound.volume = this.sfxVolume; // Ensure volume is current
-            sound.currentTime = 0; // Rewind before playing
-            sound.play().catch(e => console.error(`Error playing sound ${name}:`, e));
-            // console.log(`Playing sound '${name}'`);
+        const originalSound = this.sounds.get(name);
+        if (originalSound && originalSound.src) {
+            // --- Add specific logging for 'fire' sound ---
+            if (name === 'fire') {
+                const timestamp = performance.now(); // High-resolution timestamp
+                console.log(`FIRE sound triggered at: ${timestamp.toFixed(2)}ms`);
+            }
+            // --------------------------------------------
+            
+            // Create a new Audio object each time for reliable playback of rapid SFX
+            const soundInstance = new Audio(originalSound.src);
+            soundInstance.volume = this.sfxVolume; // Use current SFX volume
+            
+            // Optional: Add an event listener to remove the element after it finishes playing
+            // This helps with cleanup, though garbage collection might handle it eventually.
+            soundInstance.addEventListener('ended', () => {
+                // Maybe do something here? Or just let it be GC'd.
+                // We don't have a reference to remove it from a specific list.
+            });
+            
+            soundInstance.play().catch(e => console.error(`Error playing sound instance ${name}:`, e));
+            // No need to rewind (currentTime = 0) as it's a fresh instance
+            // console.log(`Playing new instance of sound '${name}'`);
         } else {
-            console.warn(`Sound '${name}' not found or not loaded.`);
+            console.warn(`Sound '${name}' not found, not loaded, or has no src.`);
         }
     }
 
@@ -96,23 +113,66 @@ export class AudioManager {
     
     // --- Background Music Controls ---
 
-    playBackgroundMusic(): void {
+    // Modified to handle starting new level music vs resuming/continuing
+    playBackgroundMusic(isNewLevel: boolean = false): void {
         if (this.isMuted || this.musicTracks.length === 0) return;
         
         // If music is currently loaded, paused, and was intentionally paused, just resume it
         if (this.musicElement && this.musicElement.paused && this.isMusicPaused) {
             console.log("Resuming paused background music.");
              this.isMusicPaused = false;
-             this.musicElement.play().catch(e => console.error("Error resuming music:", e));
+             // Check readyState before playing to potentially avoid errors
+             if (this.musicElement.readyState >= 3) { // HAVE_FUTURE_DATA or HAVE_ENOUGH_DATA
+                this.musicElement.play().catch(e => console.error("Error resuming music:", e));
+             } else {
+                 console.warn("Music not ready to resume, will try again on 'canplaythrough'.");
+                 // Add a listener to play when ready, remove it after playing
+                 const playWhenReady = () => {
+                    if (!this.isMusicPaused) { // Check again in case it got paused/stopped
+                        this.musicElement?.play().catch(e => console.error("Error resuming music from canplaythrough:", e));
+                    }
+                    this.musicElement?.removeEventListener('canplaythrough', playWhenReady);
+                 };
+                 this.musicElement.addEventListener('canplaythrough', playWhenReady);
+             }
              return; // Don't start a new track
         }
         
-        // Otherwise, start the playlist (shuffles and plays next)
-        console.log("Starting background music playlist...");
-        this.isMusicPaused = false;
-        this.shuffleTracks();
-        this.currentTrackIndex = -1;
-        this.playNextTrack();
+        // If it's a new level, shuffle and start from the first track
+        if (isNewLevel) {
+            console.log("Starting music for new level...");
+            this.isMusicPaused = false;
+            this.shuffleTracks();
+            this.currentTrackIndex = -1; // Will be incremented to 0 in playNextTrack
+            this.playNextTrack();
+        } 
+        // Otherwise (e.g., starting next wave in the same level), continue playing the CURRENT track if one is loaded
+        else if (this.musicElement && this.musicElement.src && !this.isMusicPaused) {
+             // If it's not playing, try to play the current track
+             if (this.musicElement.paused) {
+                 console.log(`Continuing current background track: ${this.musicElement.src}`);
+                 if (this.musicElement.readyState >= 3) {
+                    this.musicElement.play().catch(e => console.error(`Error playing current track ${this.musicElement?.src}:`, e));
+                 } else {
+                     console.warn("Music not ready to play, will try again on 'canplaythrough'.");
+                     const playWhenReady = () => {
+                         if (!this.isMusicPaused) {
+                            this.musicElement?.play().catch(e => console.error("Error playing current track from canplaythrough:", e));
+                         }
+                        this.musicElement?.removeEventListener('canplaythrough', playWhenReady);
+                     };
+                     this.musicElement.addEventListener('canplaythrough', playWhenReady);
+                 }
+             }
+        } 
+        // If no track is loaded/playing and it's not a new level (e.g., game start before first level), start the playlist
+        else if (!this.musicElement?.src) {
+            console.log("Starting background music playlist for the first time...");
+            this.isMusicPaused = false;
+            this.shuffleTracks();
+            this.currentTrackIndex = -1;
+            this.playNextTrack();
+        }
     }
     
     private playNextTrack(): void {
@@ -121,24 +181,61 @@ export class AudioManager {
              return;
         }
         
+        // --- Explicitly stop before loading next ---
+        if (this.musicElement && !this.musicElement.paused) {
+            this.musicElement.pause();
+            this.musicElement.currentTime = 0; // Reset position
+            console.log("Stopping previous track before playing next.");
+        }
+        // ----------------------------------------
+        
         this.currentTrackIndex++;
+        // If we went past the end, reshuffle and wrap around
         if (this.currentTrackIndex >= this.musicTracks.length) {
-            this.shuffleTracks(); // Reshuffle when playlist ends
+            console.log("Reached end of playlist, reshuffling...");
+            this.shuffleTracks(); 
             this.currentTrackIndex = 0;
         }
         
+        if (this.currentTrackIndex < 0) { // Handle case where it was -1 initially
+            this.currentTrackIndex = 0;
+        }
+
         if (this.musicElement && this.musicTracks[this.currentTrackIndex]) {
              const nextTrackSrc = this.musicTracks[this.currentTrackIndex];
             console.log(`Playing music track ${this.currentTrackIndex}: ${nextTrackSrc}`);
+            // Only change src if it's different to avoid interrupting playback unnecessarily
+            // or causing issues if the same track needs to loop conceptually after reshuffle
+            // --- Move src assignment after potential stop ---
+            // if (this.musicElement.src !== nextTrackSrc) { 
+            //     this.musicElement.src = nextTrackSrc;
+            //     this.musicElement.volume = this.musicVolume; // Ensure volume is current
+            // }
             this.musicElement.src = nextTrackSrc;
-            this.musicElement.volume = this.musicVolume; // Ensure volume is current
-            this.musicElement.play().catch(e => {
-                console.error(`Error playing music track ${nextTrackSrc}:`, e);
-                 // Try next track after a delay if play fails
-                 setTimeout(() => this.playNextTrack(), 1000);
-            });
+            this.musicElement.volume = this.musicVolume;
+            // ----------------------------------------------
+            
+            // Attempt to play, handle potential errors and readiness
+            const playPromise = this.musicElement.play();
+            if (playPromise !== undefined) {
+                playPromise.catch(error => {
+                    // Autoplay prevention is common, often requires user interaction first.
+                    // We might already have interaction, but it's good to log.
+                    console.error(`Error playing music track ${nextTrackSrc}:`, error);
+                    // Attempting to play next track might lead to loops if all fail.
+                    // Consider a flag to prevent rapid retries or notify user.
+                    // For now, just log and rely on 'ended' event or manual calls.
+                    // setTimeout(() => this.playNextTrack(), 5000); // Maybe retry after longer delay?
+                });
+            }
         } else {
-            console.warn("Music element not available or track index out of bounds.");
+            console.warn("Music element not available or track index out of bounds/invalid.");
+            // Attempt to recover if possible
+             if (this.musicTracks.length > 0) {
+                 console.log("Attempting to recover music playback.");
+                 this.currentTrackIndex = -1; // Reset and try again
+                 setTimeout(() => this.playNextTrack(), 1000); 
+             }
         }
     }
     
@@ -187,19 +284,40 @@ export class AudioManager {
     playUpgradeMusic(): void {
         if (this.isMuted || this.upgradeMusicTracks.length === 0) return;
         
-        // Resume if paused
-        if (this.upgradeMusicElement && this.upgradeMusicElement.paused && this.isUpgradeMusicPaused) {
-            console.log("Resuming paused upgrade music.");
-             this.isUpgradeMusicPaused = false;
-             this.upgradeMusicElement.play().catch(e => console.error("Error resuming upgrade music:", e));
-             return;
+        // Stop any currently playing upgrade track before starting a new one
+        if (this.upgradeMusicElement && !this.upgradeMusicElement.paused) {
+             this.upgradeMusicElement.pause();
+             this.upgradeMusicElement.currentTime = 0;
         }
         
-        console.log("Starting upgrade music playlist...");
+        console.log("Starting a random upgrade music track...");
         this.isUpgradeMusicPaused = false;
+        
+        // Shuffle the tracks to ensure variety over time and handle playlist end
         this.shuffleUpgradeTracks();
-        this.currentUpgradeTrackIndex = -1;
-        this.playNextUpgradeTrack();
+        
+        // --- FIX: Directly choose and play a random track from the shuffled list ---
+        // Instead of resetting to -1 and playing index 0 via playNextUpgradeTrack,
+        // pick a random index directly.
+        this.currentUpgradeTrackIndex = Math.floor(Math.random() * this.upgradeMusicTracks.length);
+        
+        if (this.upgradeMusicElement && this.upgradeMusicTracks[this.currentUpgradeTrackIndex]) {
+            const trackToPlaySrc = this.upgradeMusicTracks[this.currentUpgradeTrackIndex];
+            console.log(`Playing randomly selected upgrade music track ${this.currentUpgradeTrackIndex}: ${trackToPlaySrc}`);
+            this.upgradeMusicElement.src = trackToPlaySrc;
+            this.upgradeMusicElement.volume = this.musicVolume;
+            this.upgradeMusicElement.play().catch(e => {
+                console.error(`Error playing upgrade music track ${trackToPlaySrc}:`, e);
+                // Maybe try the *next* track in the shuffled list on error?
+                setTimeout(() => this.playNextUpgradeTrack(), 1000); 
+            });
+        } else {
+            console.warn("Upgrade music element not available or randomly selected track index invalid.");
+            // Attempt to recover if tracks exist
+            if (this.upgradeMusicTracks.length > 0) {
+                this.playNextUpgradeTrack(); // Fallback to playing the next (index 0 after shuffle)
+            }
+        }
     }
     
     private playNextUpgradeTrack(): void {

@@ -1,15 +1,57 @@
 body {
     margin: 0;
     overflow: hidden; /* Prevent scrollbars */
-    background-color: #111; /* Dark background */
+    position: relative; /* Needed for absolute positioning of canvas */
+    background-color: #000; /* Fallback background */
+    /* background-image related lines removed as canvas will handle it */
     display: flex;
     justify-content: center;
     align-items: center;
     height: 100vh;
+    color: white; /* Ensure text is visible on dark background */
+    font-family: sans-serif; /* Basic font */
 }
 
-canvas {
-    display: block;
-    background-color: #000; /* Black canvas */
-    /* Width and height will be set dynamically */
+#mainMenu {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px; /* Spacing between elements */
+    background-color: rgba(0, 0, 0, 0.7); /* Semi-transparent dark background for readability */
+    padding: 40px;
+    border-radius: 10px;
+    position: relative; /* Ensure menu is above canvas */
+    z-index: 10; /* Place menu above canvas */
+}
+
+#mainMenu h1 {
+    margin-bottom: 20px;
+    font-size: 2.5em;
+}
+
+#mainMenu button {
+    padding: 15px 30px;
+    font-size: 1.2em;
+    cursor: pointer;
+    border: none;
+    border-radius: 5px;
+    background-color: #ff8c00; /* Example button color */
+    color: white;
+    transition: background-color 0.3s ease;
+    pointer-events: auto; /* Ensure buttons receive clicks */
+}
+
+#mainMenu button:hover {
+    background-color: #e07b00;
+}
+
+canvas#gameCanvas { /* Target the specific canvas */
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 1; /* Place canvas behind menu */
+    display: block; /* Ensure it's displayed */
+    background-color: #000; /* Optional: fallback if background doesn't load */
 } 

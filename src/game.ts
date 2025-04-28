@@ -26,29 +26,38 @@ import { AssetManager } from './assetManager';
 import { levelConfig, WaveConfig, WaveEnemyConfig, BOSS_LEVEL_INTERVAL } from './LevelConfig'; // Import level config
 import { Item, ItemType } from './items'; // Import Item and ItemType
 import { PizzaType } from './player'; // Import PizzaType
+import { BackgroundManager } from './background'; // Import BackgroundManager
 
-// Enum for game states
-enum GameState {
+// Export GameState enum
+export enum GameState {
+    Menu, // NEW: Initial state showing the menu
     Loading,
     Running,
     GameOver,
     GameWon,
     DisplayWaveStart,
-    UpgradingStats, // New state for stat upgrading
+    UpgradingStats,
 }
 
 class Game {
     private canvas: HTMLCanvasElement;
     private ctx: CanvasRenderingContext2D;
-    private player: Player;
+    private player: Player | null = null;
+    private backgroundManager: BackgroundManager | null = null;
     private lastTime: number = 0;
     private audioManager: AudioManager;
+    private assetManager: AssetManager;
     private projectiles: Projectile[] = [];
     private enemies: Enemy[] = [];
-    private items: Item[] = []; // Added array for items
-    private assetManager: AssetManager;
+    private items: Item[] = [];
     private assetsLoaded: boolean = false;
-    private gameState: GameState = GameState.Loading;
+    private gameState: GameState = GameState.Menu; // Start in Menu state
+
+    // --- Score and User Info ---
+    private score: number = 0;
+    private userId: number | null = null;
+    private username: string | null = null;
+    // -------------------------
 
     // Wave Management State
     private currentWaveIndex: number = -1; // Overall index in the levelConfig array
@@ -75,6 +84,10 @@ class Game {
     }> = [];
     private levelCompleted: boolean = false;
 
+    // Loop control
+    private animationFrameId: number | null = null;
+    private isBackgroundLoopOnly: boolean = false;
+
     constructor() {
         // Initialize Telegram Web App if available
         const telegramObj = window as any;
@@ -82,6 +95,17 @@ class Game {
             const tg = telegramObj.Telegram.WebApp;
             tg.ready();
             tg.expand();
+            // Get user info for leaderboard
+            if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
+                this.userId = tg.initDataUnsafe.user.id;
+                this.username = tg.initDataUnsafe.user.username || 
+                                 `${tg.initDataUnsafe.user.first_name}${tg.initDataUnsafe.user.last_name ? ' ' + tg.initDataUnsafe.user.last_name : ''}`.trim() || 
+                                 `user_${this.userId}`;
+                console.log(`Logged in as: ${this.username} (ID: ${this.userId})`);
+                // Note: Login call is handled in menu.js before game loads
+            } else {
+                console.warn("Could not get Telegram user info.");
+            }
         }
         
         this.canvas = document.getElementById('gameCanvas') as HTMLCanvasElement;
@@ -92,41 +116,80 @@ class Game {
         this.ctx = context;
         this.audioManager = new AudioManager();
         this.assetManager = new AssetManager();
-
-        // Queue all assets (including sounds)
+        
+        // Queue assets (doesn't load them yet)
         this.queueAssets();
 
         this.resizeCanvas();
 
-        this.player = new Player(
-            this.canvas.width / 2,
-            this.canvas.height - 60,
-            this.canvas,
-            this.audioManager,
-            this.assetManager,
-            this.addProjectile.bind(this)
-        );
-
-        window.addEventListener('resize', this.resizeCanvas.bind(this));
-        
-        // Add click handler for upgrade buttons
-        this.canvas.addEventListener('click', this.handleCanvasClick.bind(this));
-        // Add touch handler for upgrade buttons
-        this.canvas.addEventListener('touchstart', this.handleCanvasTouch.bind(this), { passive: false }); // Added touch listener
-
+        // Bind methods
         this.gameLoop = this.gameLoop.bind(this);
-        this.spawnEnemy = this.spawnEnemy.bind(this);
-        this.spawnBoss = this.spawnBoss.bind(this);
+        this.handlePlayClick = this.handlePlayClick.bind(this);
+        this.handleLeaderboardClick = this.handleLeaderboardClick.bind(this);
+        this.resizeCanvas = this.resizeCanvas.bind(this);
+        this.handleCanvasClick = this.handleCanvasClick.bind(this);
+        this.handleCanvasTouch = this.handleCanvasTouch.bind(this);
         this.addProjectile = this.addProjectile.bind(this);
+        this.updateScore = this.updateScore.bind(this);
+        this.spawnItem = this.spawnItem.bind(this);
         this.addEnemyProjectile = this.addEnemyProjectile.bind(this);
-        this.spawnItem = this.spawnItem.bind(this); // Bind spawnItem
+
+        // Add event listeners
+        window.addEventListener('resize', this.resizeCanvas);
+        this.canvas.addEventListener('click', this.handleCanvasClick);
+        this.canvas.addEventListener('touchstart', this.handleCanvasTouch, { passive: false });
         
-        // Set up upgrade buttons
-        this.setupUpgradeButtons();
+        // Add Menu Button Listeners (ensure elements exist)
+        const playButton = document.getElementById('playButton');
+        const leaderboardButton = document.getElementById('leaderboardButton');
+        if (playButton) {
+            playButton.addEventListener('click', this.handlePlayClick);
+        } else {
+            console.error("Play button not found!");
+        }
+        if (leaderboardButton) {
+            leaderboardButton.addEventListener('click', this.handleLeaderboardClick);
+        } else {
+             console.error("Leaderboard button not found!");
+        }
+        
+        // Initialize Telegram SDK (moved here from start of constructor)
+        this.initializeTelegram(); 
+    }
+    
+    private initializeTelegram(): void {
+        const telegramObj = window as any;
+        if (telegramObj.Telegram && telegramObj.Telegram.WebApp) {
+            const tg = telegramObj.Telegram.WebApp;
+            tg.ready();
+            tg.expand();
+             console.log("Telegram Web App SDK initialized.");
+            // Get user info - might be null initially
+            if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
+                this.userId = tg.initDataUnsafe.user.id;
+                this.username = tg.initDataUnsafe.user.username || 
+                                 `${tg.initDataUnsafe.user.first_name}${tg.initDataUnsafe.user.last_name ? ' ' + tg.initDataUnsafe.user.last_name : ''}`.trim() || 
+                                 `user_${this.userId}`;
+                console.log(`User info available: ${this.username} (ID: ${this.userId})`);
+            } else {
+                console.warn("Telegram user info not immediately available.");
+            }
+        } else {
+             console.error("Telegram SDK not found.");
+        }
     }
     
     private queueAssets(): void {
-        // Player Pizza Sprites
+        // --- Background Assets ---
+        const bgBasePath = 'assets/backgrounds/';
+        this.assetManager.queueImage(bgBasePath + 'blue-back.png', bgBasePath + 'blue-back.png');
+        this.assetManager.queueImage(bgBasePath + 'blue-stars.png', bgBasePath + 'blue-stars.png');
+        this.assetManager.queueImage(bgBasePath + 'asteroid-1.png', bgBasePath + 'asteroid-1.png');
+        this.assetManager.queueImage(bgBasePath + 'asteroid-2.png', bgBasePath + 'asteroid-2.png');
+        this.assetManager.queueImage(bgBasePath + 'prop-planet-big.png', bgBasePath + 'prop-planet-big.png');
+        this.assetManager.queueImage(bgBasePath + 'prop-planet-small.png', bgBasePath + 'prop-planet-small.png');
+        
+        // --- Player Pizza Sprites ---
         this.assetManager.queueImage('pizza-plain', 'assets/plain.png');
         this.assetManager.queueImage('pizza-pepperoni', 'assets/pepperoni.png');
         this.assetManager.queueImage('pizza-hawaiian', 'assets/hawaiian.png');
@@ -249,20 +312,19 @@ class Game {
                 y >= button.y &&
                 y <= button.y + button.height
             ) {
+                // --- MUSIC CHANGE START ---
+                // Stop upgrade menu music IMMEDIATELY
+                this.audioManager.stopUpgradeMusic(); 
                 // Play upgrade confirmation sound
                 this.audioManager.playSound('upgrade-selected');
+                // --- MUSIC CHANGE END ---
                 
                 // Log state before upgrade
                 this.logGameState("Before Upgrade");
                 
                 // Upgrade the selected stat
-                this.player.upgradeStat(button.statType);
+                this.player?.upgradeStat(button.statType);
                 
-                // Stop upgrade menu music 
-                this.audioManager.stopUpgradeMusic(); 
-                // Resume background music
-                this.audioManager.resumeBackgroundMusic();
-
                 // Store the level we're currently on
                 const currentLevel = this.currentLevelNumber;
                 
@@ -295,6 +357,7 @@ class Game {
                     console.log("All waves completed! Game Won!");
                     this.gameState = GameState.GameWon;
                     this.audioManager.stopBackgroundMusic(); // Stop music on win
+                    this.sendScoreToBackend(); // <<< SEND SCORE ON GAME WON
                     return;
                 }
                 
@@ -323,493 +386,199 @@ class Game {
             this.player.x = this.canvas.width / 2;
             this.player.y = this.canvas.height - 60;
         }
-        
+        // Resize background manager as well
+        if (this.backgroundManager) { 
+            this.backgroundManager.resize(this.canvas.width, this.canvas.height);
+        }
         // Update button positions
         this.setupUpgradeButtons();
     }
 
-    public async start(): Promise<void> {
+    public async startInitialLoad(): Promise<void> { // Renamed to avoid confusion with starting game loop
+        if (this.assetsLoaded) return; // Don't reload
+        
+        this.gameState = GameState.Loading; // Show loading screen
+        // Draw loading screen once manually before starting loop
+        this.draw(); 
+        
         try {
             console.log('Starting asset loading...');
             await this.assetManager.loadAll();
             this.assetsLoaded = true;
-            this.gameState = GameState.Loading; // Should transition away after loading
             console.log('Assets loaded successfully.');
 
-            console.log('Game starting...');
-            this.lastTime = performance.now();
-            this.resetGame(); // Reset and prepare for the first stage/wave
-            requestAnimationFrame(this.gameLoop);
+            // *** Initialize components AFTER assets are loaded ***
+            console.log('Initializing BackgroundManager...');
+            this.backgroundManager = new BackgroundManager(this.assetManager, this.canvas.width, this.canvas.height);
+            
+            console.log('Initializing Player...');
+            // Ensure Player is created only once
+            if (!this.player) { 
+                this.player = new Player(
+                    this.canvas.width / 2,
+                    this.canvas.height - 60,
+                    this.canvas,
+                    this.audioManager,
+                    this.assetManager,
+                    this.addProjectile.bind(this),
+                    this.updateScore.bind(this)
+                );
+            }
+            // Set up buttons again after resize potentially happened during loading
+            this.setupUpgradeButtons(); 
+            
+            // Assets are loaded, transition back to Menu state 
+            // and start the background-only animation loop
+            this.gameState = GameState.Menu; 
+            this.startAnimationLoop(true); // Start background-only loop
 
         } catch (error) {
             console.error("Failed to load assets. Cannot start game.", error);
-            this.ctx.fillStyle = 'white';
-            this.ctx.font = '20px Arial';
-            this.ctx.fillText('Error loading game assets. Please refresh.', 50, 100);
+            // Stay in loading state and show error (draw loop will handle this)
+            // Optionally change state to an Error state
+        }
+    }
+    
+    // Method to start the animation loop (either background-only or full game)
+    private startAnimationLoop(backgroundOnly: boolean): void {
+        if (this.animationFrameId !== null) {
+            console.warn("Animation loop already running.");
+            return;
+        }
+        console.log(`Starting animation loop (Background Only: ${backgroundOnly})`);
+        this.isBackgroundLoopOnly = backgroundOnly;
+        this.lastTime = performance.now();
+        this.animationFrameId = requestAnimationFrame(this.gameLoop);
+    }
+    
+    // Method to stop the animation loop
+    private stopAnimationLoop(): void {
+        if (this.animationFrameId !== null) {
+            console.log("Stopping animation loop.");
+            cancelAnimationFrame(this.animationFrameId);
+            this.animationFrameId = null;
         }
     }
 
+    // *** MAIN GAME LOOP ***
     private gameLoop(timestamp: number): void {
-        if (!this.assetsLoaded && this.gameState === GameState.Loading) {
-            // Still loading assets, keep requesting frame but do nothing else
-            requestAnimationFrame(this.gameLoop);
-            return;
-        }
+        if (this.animationFrameId === null) return; // Check if loop should be stopped
 
         const deltaTime = (timestamp - this.lastTime) / 1000;
         this.lastTime = timestamp;
+        
+        // --- LOGGING --- 
+        // console.log(`%cLOOP: ${GameState[this.gameState]}, Delta: ${deltaTime.toFixed(4)}s`, 'color: gray');
+        // ---------------
 
+        // Update game state
         this.update(deltaTime);
+        
+        // Draw based on state
         this.draw();
-
-        if (this.gameState !== GameState.GameOver && this.gameState !== GameState.GameWon) {
-            requestAnimationFrame(this.gameLoop);
-        }
+        
+        // Request next frame
+        this.animationFrameId = requestAnimationFrame(this.gameLoop); 
     }
 
     private update(deltaTime: number): void {
-        // State machine for game logic
+        // Always update background if it exists and we're not in loading
+        if (this.backgroundManager && this.gameState !== GameState.Loading) {
+            this.backgroundManager.update(deltaTime);
+        }
+        
+        // Don't run game logic if only background loop is active
+        if (this.isBackgroundLoopOnly) return; 
+        
+        // State machine for game logic (only runs if !isBackgroundLoopOnly)
         switch (this.gameState) {
+            case GameState.Menu:
             case GameState.Loading:
-                // Should not happen if assetsLoaded check passes in gameLoop
+                // No game logic updates needed
                 break;
-
             case GameState.DisplayWaveStart:
                 this.displayTimer -= deltaTime;
                 if (this.displayTimer <= 0) {
-                    this.startNextWave(); // Start the actual wave after display
+                    this.startNextWave(); 
                 }
                 break;
-
             case GameState.Running:
-                this.updateRunning(deltaTime);
+                this.updateRunning(deltaTime); // Player, enemies, projectiles, collisions
                 break;
-                
             case GameState.UpgradingStats:
-                // Music is paused/stopped via state transition
+                // No updates needed, waiting for player input handled by event listener
                 break;
-
             case GameState.GameOver:
             case GameState.GameWon:
-                // Music stopped via state transition
+                // Game ended, no updates
                 break;
         }
-    }
-
-    private updateRunning(deltaTime: number): void {
-        // Update player
-        this.player.update(deltaTime);
-
-        // Update projectiles
-        this.projectiles.forEach(p => p.update(deltaTime, this.canvas.width, this.canvas.height));
-        this.projectiles = this.projectiles.filter(p => p.isActive);
-
-        // Update enemies
-        this.enemies.forEach(e => e.update(deltaTime, this.canvas.width, this.canvas.height));
-        this.enemies = this.enemies.filter(e => e.isActive);
-
-        // Update items
-        this.items.forEach(i => i.update(deltaTime, this.canvas.height));
-        this.items = this.items.filter(i => i.isActive);
-
-        // Check collisions
-        this.checkCollisions();
-
-        // Spawn new enemies if needed
-        this.spawnEnemy();
-
-        // Check for wave completion
-        this.checkWaveCompletion();
-        
-        // Check for game over
-        if (!this.player.isAlive()) {
-            this.gameState = GameState.GameOver;
-            this.audioManager.stopBackgroundMusic(); // Stop music
-            this.audioManager.playSound('game-over'); // Play game over sound
-            console.log("Game Over!");
-        }
-    }
-
-    private checkWaveCompletion(): void {
-        if (!this.currentWave) return; // Should not happen in Running state
-
-        const bossDefeated = this.currentWave.isBossWave && this.enemies.length === 0 && this.enemiesSpawnedThisWave > 0;
-        const regularWaveComplete = !this.currentWave.isBossWave && 
-                                  this.enemiesSpawnedThisWave >= this.totalEnemiesThisWave && 
-                                  this.enemies.length === 0;
-
-        if (bossDefeated || regularWaveComplete) {
-            console.log(`Wave ${this.currentWave.waveNumber} Complete!`);
-            
-            const isLastWaveInLevel = this.currentWave.waveInLevel === 
-                (this.currentWave.levelNumber % BOSS_LEVEL_INTERVAL === 0 ? 3 : 2);
-            
-            if (isLastWaveInLevel) {
-                console.log(`Level ${this.currentWave.levelNumber} completed! Showing upgrade screen.`);
-                this.levelCompleted = true;
-                this.gameState = GameState.UpgradingStats;
-                this.audioManager.pauseBackgroundMusic(); // Pause gameplay music
-                this.audioManager.playUpgradeMusic(); // Play upgrade menu music playlist
-            } else {
-                console.log(`Wave ${this.currentWave.waveNumber} completed, but not the last wave in level. Moving to next wave.`);
-                this.prepareForNextSequence();
-            }
-        }
-    }
-
-    private prepareForNextSequence(): void {
-        // Log state before next sequence
-        this.logGameState("Before Next Sequence");
-        
-        // Only increment if we're not coming from upgrade screen
-        if (this.gameState !== GameState.UpgradingStats && this.gameState !== GameState.DisplayWaveStart) {
-            this.currentWaveIndex++;
-        }
-        
-        // Reset level completion flag
-        this.levelCompleted = false;
-
-        if (this.currentWaveIndex >= levelConfig.length) {
-            console.log("All waves completed! Game Won!");
-            this.gameState = GameState.GameWon;
-             this.audioManager.stopBackgroundMusic(); // Stop music on win
-            // TODO: Play game won sound?
-            return;
-        }
-
-        const nextWaveConfig = levelConfig[this.currentWaveIndex];
-
-        // --- Update Level/Wave Tracking --- 
-        this.currentLevelNumber = nextWaveConfig.levelNumber;
-        this.currentWaveInLevel = nextWaveConfig.waveInLevel;
-
-        // Calculate total enemies for the upcoming wave
-        this.totalEnemiesThisWave = nextWaveConfig.isBossWave
-            ? 1
-            : nextWaveConfig.enemies.reduce((sum, enemyConf) => sum + enemyConf.count, 0);
-        this.enemiesSpawnedThisWave = 0;
-
-        console.log(`Preparing Level ${this.currentLevelNumber} - Wave ${this.currentWaveInLevel} Start Screen... (Enemies: ${this.totalEnemiesThisWave})`);
-        this.gameState = GameState.DisplayWaveStart;
-        this.displayTimer = this.displayDuration;
-        
-        // Log state after next sequence
-        this.logGameState("After Next Sequence");
-    }
-
-    private checkCollisions(): void {
-        // Projectile vs Enemy collisions
-        this.projectiles.forEach(proj => {
-            if (!proj.isActive || !proj.isPlayerProjectile) return;
-
-            this.enemies.forEach(enemy => {
-                if (!enemy.isActive || !enemy.isAlive()) return;
-
-                // AABB collision check (using radius for projectile)
-                const projLeft = proj.x - proj.radius;
-                const projRight = proj.x + proj.radius;
-                const projTop = proj.y - proj.radius;
-                const projBottom = proj.y + proj.radius;
-
-                const enemyLeft = enemy.x - enemy.width / 2;
-                const enemyRight = enemy.x + enemy.width / 2;
-                const enemyTop = enemy.y - enemy.height / 2;
-                const enemyBottom = enemy.y + enemy.height / 2;
-
-                if (
-                    projRight > enemyLeft &&
-                    projLeft < enemyRight &&
-                    projBottom > enemyTop &&
-                    projTop < enemyBottom
-                ) {
-                    enemy.takeDamage(proj.damage); // Use projectile's damage property
-                    proj.isActive = false; // Deactivate projectile on hit
-                    // TODO: Add hit effect/sound
-                }
-            });
-        });
-
-        // Player vs Enemy collisions
-        this.enemies.forEach(enemy => {
-            if (!enemy.isActive || !enemy.isAlive()) return;
-
-            // Simple AABB collision check (using player width/height)
-            if (
-                this.player.x < enemy.x + enemy.width / 2 &&
-                this.player.x + this.player.width / 2 > enemy.x - enemy.width / 2 &&
-                this.player.y < enemy.y + enemy.height / 2 &&
-                this.player.y + this.player.height / 2 > enemy.y - enemy.height / 2
-            ) {
-                // Damage player (e.g., 1 damage per collision)
-                this.player.takeDamage(1);
-                // Optionally damage/destroy enemy too, or bounce back
-                enemy.takeDamage(1); // Example: Enemy also takes damage
-                 console.log("Collision between player and enemy!");
-                // TODO: Add collision effect/sound
-            }
-        });
-
-        // Player vs Item collisions
-        this.items.forEach(item => {
-            if (!item.isActive) return;
-
-            // Simple AABB collision check
-             if (
-                this.player.x < item.x + item.width / 2 &&
-                this.player.x + this.player.width / 2 > item.x - item.width / 2 &&
-                this.player.y < item.y + item.height / 2 &&
-                this.player.y + this.player.height / 2 > item.y - item.height / 2
-            ) {
-                this.collectItem(item);
-                item.isActive = false; // Deactivate item on collect
-            }
-        });
-        
-         // Enemy Projectile vs Player collisions
-        this.projectiles.forEach(proj => {
-            if (!proj.isActive || proj.isPlayerProjectile) return;
-
-            // AABB collision check (using radius for projectile)
-            const projLeft = proj.x - proj.radius;
-            const projRight = proj.x + proj.radius;
-            const projTop = proj.y - proj.radius;
-            const projBottom = proj.y + proj.radius;
-
-            const playerLeft = this.player.x - this.player.width / 2;
-            const playerRight = this.player.x + this.player.width / 2;
-            const playerTop = this.player.y - this.player.height / 2;
-            const playerBottom = this.player.y + this.player.height / 2;
-
-            if (
-                projRight > playerLeft &&
-                projLeft < playerRight &&
-                projBottom > playerTop &&
-                projTop < playerBottom
-            ) {
-                this.player.takeDamage(proj.damage); // Use projectile's damage
-                proj.isActive = false; // Deactivate projectile on hit
-                console.log("Player hit by enemy projectile!");
-                // TODO: Add hit effect/sound
-            }
-        });
-    }
-    
-    // Handle collecting an item
-    private collectItem(item: Item): void {
-        console.log(`Collected item: ${item.type}`);
-        let playSound = true;
-        switch (item.type) {
-            case ItemType.Health:
-                this.player.heal(1); // Heal handles its own sound check now
-                playSound = false; // Don't play generic collect sound for health
-                break;
-            case ItemType.PizzaChange:
-                 const nextPizzaType = this.getRandomPizzaType();
-                 this.player.changeShip(nextPizzaType); // ChangeShip plays its own sound
-                 playSound = false;
-                 break;
-            case ItemType.TempFireRate:
-                 this.player.activateTempFireRate(10); // Plays boost-activate sound
-                 playSound = false;
-                 break;
-            case ItemType.TempDamage:
-                 this.player.activateTempDamage(10); // Plays boost-activate sound
-                 playSound = false;
-                 break;
-        }
-        if (playSound) {
-             this.audioManager.playSound('collect-item'); // Fallback sound
-        }
-    }
-    
-    // Helper to get a random pizza type (excluding Plain)
-    private getRandomPizzaType(): PizzaType {
-        const types = [PizzaType.Pepperoni, PizzaType.Hawaiian, PizzaType.Vegetarian, PizzaType.Meatlovers];
-        // Avoid giving the same type player currently has, if possible
-         const currentType = this.player.shipType;
-         const availableTypes = types.filter(t => t !== currentType);
-         if (availableTypes.length > 0) {
-            return availableTypes[Math.floor(Math.random() * availableTypes.length)];
-         } else {
-             // Fallback if somehow player has all types (or only Plain is left)
-             return types[Math.floor(Math.random() * types.length)];
-                }
-    }
-
-    private spawnEnemy(): void {
-        if (!this.currentWave || this.currentWave.isBossWave) return;
-
-        this.enemySpawnTimer -= 1 / 60; // Assuming 60 FPS for deltaTime approximation
-        if (this.enemySpawnTimer <= 0 && this.enemiesSpawnedThisWave < this.totalEnemiesThisWave) {
-            // Determine which enemy to spawn based on wave config
-            let cumulativeCount = 0;
-            const enemyConfig = this.currentWave.enemies.find(ec => {
-                cumulativeCount += ec.count;
-                return this.enemiesSpawnedThisWave < cumulativeCount;
-            });
-
-            if (enemyConfig) {
-                const enemyType = enemyConfig.type;
-                const spawnX = Math.random() * this.canvas.width;
-                const spawnY = -50; // Spawn above screen
-            let newEnemy: Enemy | null = null;
-
-                switch (enemyType) {
-                    case EnemyType.HotDog:
-                        newEnemy = new HotDogEnemy(spawnX, spawnY, this.assetManager, this.spawnItem, this.audioManager);
-                        break;
-                    case EnemyType.FrenchFries:
-                        newEnemy = new FrenchFriesEnemy(spawnX, spawnY, this.assetManager, this.spawnItem, this.audioManager);
-                        break;
-                    case EnemyType.Donut:
-                        newEnemy = new DonutEnemy(spawnX, spawnY, this.assetManager, this.spawnItem, this.audioManager);
-                        break;
-                    case EnemyType.Hamburger:
-                        newEnemy = new HamburgerEnemy(spawnX, spawnY, this.assetManager, this.spawnItem, this.audioManager);
-                        break;
-                    // Bosses are spawned via spawnBoss
-            }
-
-            if (newEnemy) {
-                this.enemies.push(newEnemy);
-                this.enemiesSpawnedThisWave++;
-                    this.enemySpawnTimer = this.currentWave.spawnInterval; // Reset timer
-                }
-            } else {
-                 console.error("Could not determine enemy type to spawn based on wave config");
-                 // Avoid infinite loop if config is bad
-                 this.enemiesSpawnedThisWave = this.totalEnemiesThisWave; 
-            }
-        }
-    }
-
-    private spawnBoss(bossType: EnemyType): void {
-        if (bossType !== EnemyType.Taco) {
-            console.error("Attempted to spawn non-Taco boss type");
-                return;
-        }
-        const spawnX = this.canvas.width / 2;
-        const spawnY = -80; // Spawn boss higher up
-        const bossHp = 50 + (this.currentLevelNumber / BOSS_LEVEL_INTERVAL) * 25; // Scale HP based on level
-
-        const boss = new TacoEnemy(
-            spawnX,
-            spawnY,
-            bossHp,
-            this.assetManager,
-            this.addEnemyProjectile, // Pass enemy projectile callback
-            this.spawnItem, // Pass item spawn callback
-            this.audioManager, // Pass audio manager
-            this.player // Pass player reference
-        );
-            this.enemies.push(boss);
-        this.enemiesSpawnedThisWave++; // Boss counts as the one enemy for the wave
-         console.log(`Spawning Taco Boss with ${bossHp} HP`);
-    }
-
-    private startNextWave(): void {
-        // Log state before starting wave
-        this.logGameState("Before Starting Wave");
-        
-        // Now called *after* the display screen timer finishes
-        if (this.currentWaveIndex >= levelConfig.length) {
-            console.error("startNextWave called after last wave.");
-            this.gameState = GameState.GameWon;
-            return;
-        }
-
-        // --- Set the active wave config --- 
-        this.currentWave = levelConfig[this.currentWaveIndex];
-        
-        // Make sure enemies from previous waves are cleared
-        this.enemies = [];
-        
-        // Calculate total enemies for this wave
-        this.totalEnemiesThisWave = this.currentWave.isBossWave
-            ? 1
-            : this.currentWave.enemies.reduce((sum, enemyConf) => sum + enemyConf.count, 0);
-        
-        // Reset enemy spawn counters
-        this.enemiesSpawnedThisWave = 0;
-        
-        // Reset spawn timer for the wave start
-        this.enemySpawnTimer = 0;
-        
-        // Set state to Running
-        this.gameState = GameState.Running;
-        
-        // Start or resume background music for the running state
-        this.audioManager.playBackgroundMusic(); // AudioManager handles resuming vs starting new
-
-        // Log current level and wave info for debugging
-        console.log(`Starting Level ${this.currentWave.levelNumber} - Wave ${this.currentWave.waveInLevel}`);
-        console.log(`Current wave index: ${this.currentWaveIndex}, Total waves: ${levelConfig.length}`);
-        
-        if (!this.currentWave.isBossWave) {
-            console.log(`Enemies to spawn: ${this.totalEnemiesThisWave}, Interval: ${this.currentWave.spawnInterval}s`);
-        }
-
-        if (this.currentWave.isBossWave && this.currentWave.bossType) {
-            this.spawnBoss(this.currentWave.bossType);
-        } else if (this.totalEnemiesThisWave === 0 && !this.currentWave.isBossWave) {
-             console.warn(`Level ${this.currentWave.levelNumber} Wave ${this.currentWave.waveInLevel} has no enemies. Preparing next sequence.`);
-             this.prepareForNextSequence(); // Skip empty waves immediately
-        }
-        
-        // Log state after starting wave
-        this.logGameState("After Starting Wave");
     }
 
     private draw(): void {
-        // Clear the canvas
-        this.ctx.fillStyle = 'black';
-        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        // Clear canvas (important!)
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
-        // Draw content based on current game state
+        // Draw Background if it exists
+        if (this.backgroundManager) {
+            this.backgroundManager.draw(this.ctx);
+        }
+        
+        // Draw other elements based on state
         switch (this.gameState) {
+            case GameState.Menu:
+                // Background is drawn above. Menu is HTML overlay, nothing to draw on canvas.
+                break;
             case GameState.Loading:
-                this.drawLoadingScreen();
+                // Draw loading text ONLY if background isn't ready yet
+                if (!this.backgroundManager) { 
+                    this.drawLoadingScreen(); 
+                }
                 break;
-
             case GameState.Running:
-                this.drawRunningGame();
+                if (this.player) this.drawRunningGame();
                 break;
-
             case GameState.DisplayWaveStart:
-                this.drawWaveStartScreen();
+                 if (this.player) this.drawRunningGame(); // Draw game under wave screen
+                 this.drawWaveStartScreen();
                 break;
-                
             case GameState.UpgradingStats:
-                this.drawUpgradeScreen();
+                 if (this.player) this.drawRunningGame(); // Draw game under upgrade screen
+                 this.drawUpgradeScreen();
                 break;
-
             case GameState.GameOver:
+                if (this.player) this.drawRunningGame(); // Draw final game state
                 this.drawGameOverScreen();
                 break;
-
             case GameState.GameWon:
+                 if (this.player) this.drawRunningGame(); // Draw final game state
                 this.drawGameWonScreen();
                 break;
         }
-
-        // Always draw some aspects of the UI (FPS, etc.)
-        if (this.gameState !== GameState.Loading) {
-            this.drawUI();
+        
+        // Draw UI overlays if applicable (e.g., score, wave number)
+        if (this.gameState === GameState.Running || 
+            this.gameState === GameState.DisplayWaveStart || 
+            this.gameState === GameState.UpgradingStats || 
+            this.gameState === GameState.GameOver || 
+            this.gameState === GameState.GameWon) 
+        { 
+            if (this.player) this.drawUI(); 
         }
     }
 
     private drawRunningGame(): void {
-        // Draw player
-        this.player.draw(this.ctx);
+        // Draw enemies first
+        this.enemies.forEach(e => e.draw(this.ctx));
 
         // Draw projectiles
         this.projectiles.forEach(p => p.draw(this.ctx));
 
-        // Draw enemies
-        this.enemies.forEach(e => e.draw(this.ctx));
-
         // Draw items
         this.items.forEach(i => i.draw(this.ctx));
+        
+        // Draw player last to appear on top
+        this.player?.draw(this.ctx);
     }
     
     private drawUpgradeScreen(): void {
@@ -826,12 +595,12 @@ class Game {
         this.ctx.fillText('Choose an upgrade:', this.canvas.width / 2, 150);
         
         // Show current stats
-        const stats = this.player.getStats();
+        const stats = this.player?.getStats();
         this.ctx.font = '20px Arial';
         this.ctx.fillText(`Current Stats:`, this.canvas.width / 2, 200);
-        this.ctx.fillText(`Fire Rate: ${stats.fireRate.toFixed(1)} shots/sec`, this.canvas.width / 2, 230);
-        this.ctx.fillText(`Damage: ${stats.projectileDamage}`, this.canvas.width / 2, 260);
-        this.ctx.fillText(`Max HP: ${stats.maxHp}`, this.canvas.width / 2, 290);
+        this.ctx.fillText(`Fire Rate: ${stats?.fireRate.toFixed(1)} shots/sec`, this.canvas.width / 2, 230);
+        this.ctx.fillText(`Damage: ${stats?.projectileDamage}`, this.canvas.width / 2, 260);
+        this.ctx.fillText(`Max HP: ${stats?.maxHp}`, this.canvas.width / 2, 290);
         
         // Draw upgrade buttons
         this.ctx.font = '24px Arial';
@@ -869,11 +638,11 @@ class Game {
             this.ctx.fillText(`Enemies: ${enemiesRemaining}/${this.totalEnemiesThisWave}`, 20, 70);
             
             // Draw player stats in top-right
-            const stats = this.player.getStats();
+            const stats = this.player?.getStats();
             this.ctx.textAlign = 'right';
-            this.ctx.fillText(`Fire Rate: ${stats.fireRate.toFixed(1)}`, this.canvas.width - 20, 30);
-            this.ctx.fillText(`Damage: ${stats.projectileDamage}`, this.canvas.width - 20, 50);
-            this.ctx.fillText(`HP: ${this.player.hp}/${stats.maxHp}`, this.canvas.width - 20, 70);
+            this.ctx.fillText(`Fire Rate: ${stats?.fireRate.toFixed(1)}`, this.canvas.width - 20, 30);
+            this.ctx.fillText(`Damage: ${stats?.projectileDamage}`, this.canvas.width - 20, 50);
+            this.ctx.fillText(`HP: ${this.player?.hp}/${stats?.maxHp}`, this.canvas.width - 20, 70);
         }
     }
 
@@ -888,26 +657,38 @@ class Game {
         this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
         this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
         this.ctx.fillStyle = 'lime';
-        this.ctx.font = '40px Arial';
         this.ctx.textAlign = 'center';
         this.ctx.textBaseline = 'middle';
+
+        // --- Responsive Formatting ---
+        const isMobile = this.canvas.width < 600;
+        const titleFontSize = isMobile ? 28 : 40;
+        const objectiveFontSize = isMobile ? 20 : 28;
+        const timerFontSize = isMobile ? 14 : 18;
+        const titleY = this.canvas.height / 2 - (isMobile ? 50 : 60);
+        const objectiveY = this.canvas.height / 2;
+        const timerY = this.canvas.height / 2 + (isMobile ? 40 : 50);
+        // ---------------------------
 
         // Use upcoming wave config for display
         const upcomingWave = levelConfig[this.currentWaveIndex];
         const levelNum = upcomingWave?.levelNumber || '?';
         const waveInLevelNum = upcomingWave?.waveInLevel || '?';
-        this.ctx.fillText(`Level ${levelNum} - Wave ${waveInLevelNum}`, this.canvas.width / 2, this.canvas.height / 2 - 60);
+        
+        this.ctx.font = `${titleFontSize}px Arial`;
+        this.ctx.fillText(`Level ${levelNum} - Wave ${waveInLevelNum}`, this.canvas.width / 2, titleY);
 
         // Display Objective
         let objectiveText = `Objective: Defeat ${this.totalEnemiesThisWave} enemies`;
         if (upcomingWave?.isBossWave) {
             objectiveText = `Objective: Defeat the TACO BOSS!`;
         }
-        this.ctx.fillText(objectiveText, this.canvas.width / 2, this.canvas.height / 2);
+        this.ctx.font = `${objectiveFontSize}px Arial`;
+        this.ctx.fillText(objectiveText, this.canvas.width / 2, objectiveY);
 
         // Display Timer
-        this.ctx.font = '18px Arial';
-        this.ctx.fillText(`Starting in ${this.displayTimer.toFixed(1)}s...`, this.canvas.width / 2, this.canvas.height / 2 + 40);
+        this.ctx.font = `${timerFontSize}px Arial`;
+        this.ctx.fillText(`Starting in ${this.displayTimer.toFixed(1)}s...`, this.canvas.width / 2, timerY);
     }
 
     private drawGameOverScreen(): void {
@@ -937,6 +718,7 @@ class Game {
     }
 
     public addProjectile(x: number, y: number, angle: number, damageOverride?: number): void {
+        if (!this.player) return;
         const isPlayer = true; // This method is only called by player
         const damage = damageOverride ?? this.player.getProjectileDamage(); // Use override or player's current
         this.projectiles.push(new Projectile(x, y, isPlayer, angle, damage));
@@ -955,30 +737,33 @@ class Game {
     }
 
     private resetGame(): void {
-        // Reset player state
-        this.player.hp = this.player.maxHp;
-        this.player.x = this.canvas.width / 2;
-        this.player.y = this.canvas.height - 60;
-
-        // Clear arrays
+        console.log("Resetting game state for actual play...");
+        // Ensure player and background exist before resetting game logic
+        if (!this.player || !this.backgroundManager) { 
+             console.error("Cannot reset game, player or background not initialized!");
+             return;
+        }
         this.projectiles = [];
         this.enemies = [];
         this.items = [];
-
-        // Reset timers and flags
-        this.lastTime = performance.now();
-
-        // Reset wave/stage state
+        this.score = 0; 
         this.currentWaveIndex = -1;
-        this.currentWave = null;
+        this.currentLevelNumber = 0;
+        this.currentWaveInLevel = 0;
         this.enemiesSpawnedThisWave = 0;
         this.totalEnemiesThisWave = 0;
-        this.enemySpawnTimer = 0; // Reset enemy spawn timer
+        this.enemySpawnTimer = 0;
+        this.currentWave = null;
+        this.levelCompleted = false; 
+        this.player!.reset(); // Use non-null assertion here
 
-        console.log("Game reset.");
-        this.audioManager.stopBackgroundMusic(); // Stop music on reset
-        this.gameState = GameState.Loading;
-        this.prepareForNextSequence();
+        this.audioManager.stopBackgroundMusic();
+        this.audioManager.stopUpgradeMusic();
+        
+        this.prepareForNextSequence(); // Starts the wave display -> running sequence
+        
+        // Start full game loop updates
+        this.isBackgroundLoopOnly = false; 
     }
 
     private logGameState(message: string): void {
@@ -992,11 +777,438 @@ class Game {
             console.log(`  Current Wave: ${this.currentWave.waveNumber} (Level ${this.currentWave.levelNumber}, Wave ${this.currentWave.waveInLevel})`);
         }
     }
+
+    // --- Score Update Method --- 
+    private updateScore(change: number): void {
+        this.score += change;
+        console.log(`Score updated: ${this.score} (+${change})`);
+        // Optionally update a score display element here if needed during gameplay
+    }
+    // -------------------------
+    
+    // --- Send Score to Backend --- 
+    private async sendScoreToBackend(): Promise<void> {
+        if (!this.username || this.userId === null) {
+            console.warn("Cannot send score: User info not available.");
+            return;
+        }
+
+        if (this.score <= 0) {
+            console.log("Score is 0, not sending to backend.");
+            return;
+        }
+
+        console.log(`Sending score ${this.score} for user ${this.username} (ID: ${this.userId}) to backend...`);
+
+        try {
+            const response = await fetch('/api/submit-score', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ 
+                    username: this.username,
+                    userId: this.userId, // Send userId as well for potential future use
+                    score: this.score 
+                }),
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({ message: 'Failed to parse error response' }));
+                throw new Error(`HTTP error! status: ${response.status}, message: ${errorData.message || 'Unknown error'}`);
+            }
+
+            const result = await response.json();
+            console.log("Score submission successful:", result);
+
+        } catch (error) {
+            console.error("Error sending score to backend:", error);
+            // Optionally, display an error message to the user on the game over screen
+        }
+    }
+    // ---------------------------
+    
+    // --- NEW Menu Button Handlers ---
+    private handlePlayClick(): void {
+        console.log("Play button clicked");
+        if (!this.assetsLoaded || !this.player || !this.backgroundManager) {
+            console.error("Assets not loaded or components not initialized, cannot start game!");
+            return;
+        }
+        
+        // Hide HTML Menu
+        const mainMenuElement = document.getElementById('mainMenu');
+        if (mainMenuElement) {
+            mainMenuElement.style.display = 'none';
+        }
+        
+        // Perform user login fetch (moved from menu.js)
+        if (this.userId !== null) {
+            console.log(`Attempting login fetch for user: ${this.username} (ID: ${this.userId})`);
+             fetch('/api/login', { 
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ userId: this.userId, username: this.username }),
+                })
+                .then(response => response.json())
+                .then(data => console.log('Login response:', data))
+                .catch(error => console.error('Error logging player:', error));
+        } else {
+            console.warn('User ID not available for login fetch.');
+        }
+
+        // Reset game state and start the first wave sequence
+        this.resetGame(); 
+        // The game loop is already running (in background mode),
+        // resetGame sets isBackgroundLoopOnly = false, so it will start full updates.
+    }
+    
+    private handleLeaderboardClick(): void {
+         console.log("Leaderboard button clicked");
+         window.location.href = 'leaderboard.html';
+    }
+    // -------------------------------
+
+    // *** RESTORED GAME LOGIC METHODS ***
+    private updateRunning(deltaTime: number): void {
+        if (!this.player) return; 
+        this.player.update(deltaTime, this.gameState);
+
+        // Update projectiles
+        this.projectiles.forEach(p => p.update(deltaTime, this.canvas.width, this.canvas.height));
+        this.projectiles = this.projectiles.filter(p => p.isActive);
+
+        // Update enemies
+        this.enemies.forEach(e => e.update(deltaTime, this.canvas.width, this.canvas.height));
+        this.enemies = this.enemies.filter(e => e.isActive);
+
+        // Update items
+        this.items.forEach(i => i.update(deltaTime, this.canvas.height));
+        this.items = this.items.filter(i => i.isActive);
+
+        this.checkCollisions();
+        this.spawnEnemy(deltaTime);
+        this.checkWaveCompletion();
+        
+        // Check for game over condition
+        if (this.player && !this.player.isAlive()) {
+            this.logGameState("Player died");
+            this.gameState = GameState.GameOver;
+            this.stopAnimationLoop(); // Stop game updates
+            this.sendScoreToBackend(); // Send score when game is over
+            this.draw(); // Draw the game over screen immediately
+            this.startAnimationLoop(true); // Restart loop for background/UI only
+            return; // Skip rest of updateRunning
+        }
+    }
+    private checkWaveCompletion(): void {
+        if (!this.currentWave || !this.player) return; 
+
+        const bossDefeated = this.currentWave.isBossWave && this.enemies.length === 0 && this.enemiesSpawnedThisWave > 0;
+        const regularWaveComplete = !this.currentWave.isBossWave && 
+                                  this.enemiesSpawnedThisWave >= this.totalEnemiesThisWave && 
+                                  this.enemies.length === 0;
+
+        if (bossDefeated || regularWaveComplete) {
+            console.log(`Wave ${this.currentWave.waveNumber} Complete!`);
+            
+            const isLastWaveInLevel = this.currentWave.waveInLevel === 
+                (this.currentWave.levelNumber % BOSS_LEVEL_INTERVAL === 0 ? 3 : 2);
+            
+            if (isLastWaveInLevel) {
+                console.log(`Level ${this.currentWave.levelNumber} completed! Showing upgrade screen.`);
+                this.levelCompleted = true;
+                this.gameState = GameState.UpgradingStats;
+                this.audioManager.pauseBackgroundMusic(); 
+                this.audioManager.playUpgradeMusic(); 
+                this.sendScoreToBackend(); 
+            } else {
+                console.log(`Wave ${this.currentWave.waveNumber} completed, moving to next wave.`);
+                this.prepareForNextSequence();
+            }
+        }
+    }
+    private prepareForNextSequence(): void {
+        this.logGameState("Before Next Sequence");
+        
+        if (this.gameState !== GameState.UpgradingStats && this.gameState !== GameState.DisplayWaveStart) {
+            this.currentWaveIndex++;
+        }
+        
+        this.levelCompleted = false;
+
+        if (this.currentWaveIndex >= levelConfig.length) {
+            console.log("All waves completed! Game Won!");
+            this.gameState = GameState.GameWon;
+             this.audioManager.stopBackgroundMusic(); 
+            this.sendScoreToBackend(); 
+            return;
+        }
+
+        const nextWaveConfig = levelConfig[this.currentWaveIndex];
+        this.currentLevelNumber = nextWaveConfig.levelNumber;
+        this.currentWaveInLevel = nextWaveConfig.waveInLevel;
+        this.totalEnemiesThisWave = nextWaveConfig.isBossWave
+            ? 1
+            : nextWaveConfig.enemies.reduce((sum, enemyConf) => sum + enemyConf.count, 0);
+        this.enemiesSpawnedThisWave = 0;
+
+        console.log(`Preparing Level ${this.currentLevelNumber} - Wave ${this.currentWaveInLevel} Start Screen... (Enemies: ${this.totalEnemiesThisWave})`);
+        this.gameState = GameState.DisplayWaveStart;
+        this.displayTimer = this.displayDuration;
+        
+        this.logGameState("After Next Sequence");
+    }
+    private checkCollisions(): void {
+        if (!this.player) return;
+
+        const player = this.player; // Alias for convenience
+
+        // --- Collision Check Helper (AABB) ---
+        const checkAABB = (rect1: {x: number, y: number, width: number, height: number}, 
+                           rect2: {x: number, y: number, width: number, height: number}): boolean => {
+            // Calculate edges, assuming x/y is center
+            const rect1Left = rect1.x - rect1.width / 2;
+            const rect1Right = rect1.x + rect1.width / 2;
+            const rect1Top = rect1.y - rect1.height / 2;
+            const rect1Bottom = rect1.y + rect1.height / 2;
+
+            const rect2Left = rect2.x - rect2.width / 2;
+            const rect2Right = rect2.x + rect2.width / 2;
+            const rect2Top = rect2.y - rect2.height / 2;
+            const rect2Bottom = rect2.y + rect2.height / 2;
+            
+            // Check for overlap
+            return rect1Left < rect2Right && rect1Right > rect2Left &&
+                   rect1Top < rect2Bottom && rect1Bottom > rect2Top;
+        };
+        // -------------------------------------
+
+        // 1. Player Projectile vs. Enemy
+        this.projectiles.forEach(proj => {
+            if (!proj.isActive || !proj.isPlayerProjectile) return; // Skip inactive or enemy projectiles
+
+            this.enemies.forEach(enemy => {
+                if (!enemy.isActive) return; // Skip inactive enemies
+
+                if (checkAABB(proj, enemy)) {
+                    console.log(`Collision: Player Projectile (${proj.x.toFixed(0)}, ${proj.y.toFixed(0)}) vs Enemy ${enemy.type} (${enemy.x.toFixed(0)}, ${enemy.y.toFixed(0)})`);
+                    enemy.takeDamage(proj.damage); 
+                    proj.isActive = false;
+                    if (!enemy.isAlive()) {
+                         this.updateScore(10); // Score for destroying enemy
+                    }
+                    // Potentially add a small hit effect/sound here
+                }
+            });
+        });
+
+        // 2. Player vs. Enemy
+        this.enemies.forEach(enemy => {
+            if (!enemy.isActive) return;
+
+            if (checkAABB(player, enemy)) {
+                 console.log(`Collision: Player (${player.x.toFixed(0)}, ${player.y.toFixed(0)}) vs Enemy ${enemy.type} (${enemy.x.toFixed(0)}, ${enemy.y.toFixed(0)})`);
+                player.takeDamage(1); // Player takes 1 damage
+                enemy.takeDamage(100); // Enemy takes massive damage (usually destroyed)
+                 if (!enemy.isAlive()) {
+                         this.updateScore(5); // Smaller score for collision kill?
+                 }
+                 // Potentially add player hit effect/sound here
+            }
+        });
+
+        // 3. Player vs. Item
+        this.items.forEach(item => {
+            if (!item.isActive) return;
+            
+            if (checkAABB(player, item)) {
+                 console.log(`Collision: Player (${player.x.toFixed(0)}, ${player.y.toFixed(0)}) vs Item ${item.type} (${item.x.toFixed(0)}, ${item.y.toFixed(0)})`);
+                 this.collectItem(item);
+                 item.isActive = false;
+            }
+        });
+
+        // 4. Enemy Projectile vs. Player
+        this.projectiles.forEach(proj => {
+            if (!proj.isActive || proj.isPlayerProjectile) return; // Skip inactive or player projectiles
+
+            if (checkAABB(proj, player)) {
+                 console.log(`Collision: Enemy Projectile (${proj.x.toFixed(0)}, ${proj.y.toFixed(0)}) vs Player (${player.x.toFixed(0)}, ${player.y.toFixed(0)})`);
+                player.takeDamage(proj.damage);
+                proj.isActive = false;
+                 // Potentially add player hit effect/sound here
+            }
+        });
+    }
+    private collectItem(item: Item): void {
+        if (!this.player) return;
+        console.log(`Collected item: ${item.type}`);
+        let playSound = true;
+        switch (item.type) {
+            case ItemType.Health:
+                this.player.heal(1); 
+                playSound = false; 
+                break;
+            case ItemType.PizzaChange:
+                 const nextPizzaType = this.getRandomPizzaType();
+                 this.player.changeShip(nextPizzaType); 
+                 playSound = false;
+                 break;
+            case ItemType.TempFireRate:
+                 this.player.activateTempFireRate(10); 
+                 playSound = false;
+                 break;
+            case ItemType.TempDamage:
+                 this.player.activateTempDamage(10); 
+                 playSound = false;
+                 break;
+        }
+        if (playSound) {
+             // this.audioManager.playSound('collect-item'); // Needs a sound file
+        }
+    }
+    private getRandomPizzaType(): PizzaType {
+        if (!this.player) return PizzaType.Plain; // Default if player doesn't exist
+        const types = [PizzaType.Pepperoni, PizzaType.Hawaiian, PizzaType.Vegetarian, PizzaType.Meatlovers];
+         const currentType = this.player.shipType;
+         const availableTypes = types.filter(t => t !== currentType);
+         if (availableTypes.length > 0) {
+            return availableTypes[Math.floor(Math.random() * availableTypes.length)];
+         } else {
+             return types[Math.floor(Math.random() * types.length)];
+         }
+    }
+    private spawnEnemy(deltaTime: number): void {
+        if (!this.currentWave || this.currentWave.isBossWave || this.enemiesSpawnedThisWave >= this.totalEnemiesThisWave) {
+            return; // Don't spawn in boss waves or if wave count is met
+        }
+
+        this.enemySpawnTimer -= deltaTime;
+
+        if (this.enemySpawnTimer <= 0) {
+            // --- Determine which enemy type to spawn based on wave config --- 
+            let enemyToSpawn: EnemyType | null = null;
+            let cumulativeCount = 0;
+            for (const enemyConf of this.currentWave.enemies) {
+                cumulativeCount += enemyConf.count;
+                if (this.enemiesSpawnedThisWave < cumulativeCount) {
+                    enemyToSpawn = enemyConf.type;
+                    break;
+                }
+            }
+
+            if (!enemyToSpawn) {
+                 console.warn("Could not determine enemy type to spawn, check wave config.");
+                 this.enemySpawnTimer = this.currentWave.spawnInterval; // Reset timer anyway
+                 return;
+            }
+            
+            // --- Spawn the determined enemy --- 
+            const spawnX = Math.random() * (this.canvas.width - 50) + 25; // Random X, avoid edges
+            const spawnY = -50; // Start above screen
+            let newEnemy: Enemy | null = null;
+            
+            // Ensure player exists for targeting
+            if (!this.player) {
+                 console.error("Cannot spawn enemy, player reference is null.");
+                 this.enemySpawnTimer = this.currentWave.spawnInterval; // Reset timer
+                 return;
+            }
+
+            switch (enemyToSpawn) {
+                case EnemyType.HotDog:
+                    newEnemy = new HotDogEnemy(spawnX, spawnY, this.assetManager, this.spawnItem.bind(this), this.audioManager);
+                    break;
+                case EnemyType.FrenchFries:
+                    newEnemy = new FrenchFriesEnemy(spawnX, spawnY, this.assetManager, this.spawnItem.bind(this), this.audioManager);
+                    break;
+                case EnemyType.Donut:
+                    newEnemy = new DonutEnemy(spawnX, spawnY, this.assetManager, this.spawnItem.bind(this), this.audioManager);
+                    break;
+                 case EnemyType.Hamburger: // Added Hamburger case
+                    newEnemy = new HamburgerEnemy(spawnX, spawnY, this.assetManager, this.spawnItem.bind(this), this.audioManager);
+                    break;
+                // Add Taco case - it has a different constructor
+                case EnemyType.Taco: 
+                    // This case shouldn't be reached via spawnEnemy, but handle defensively
+                    console.warn("Attempted to spawn Taco boss via regular spawnEnemy. Use spawnBoss.");
+                    break; 
+                default:
+                    console.error(`Unhandled enemy type in spawnEnemy: ${enemyToSpawn}`);
+                // Add cases for other enemy types here...
+            }
+
+            if (newEnemy) {
+                this.enemies.push(newEnemy);
+                this.enemiesSpawnedThisWave++;
+                 console.log(`Spawned enemy ${enemyToSpawn} (${this.enemiesSpawnedThisWave}/${this.totalEnemiesThisWave})`);
+            }
+            
+            // Reset timer for the next spawn
+            this.enemySpawnTimer = this.currentWave.spawnInterval;
+        }
+    }
+    private spawnBoss(bossType: EnemyType): void {
+        if (!this.player) return;
+        // ... (rest of spawnBoss logic using this.currentLevelNumber, etc.)
+    }
+    private startNextWave(): void {
+        this.logGameState("Before Starting Wave");
+        if (this.currentWaveIndex >= levelConfig.length) {
+            console.error("startNextWave called after last wave.");
+            this.gameState = GameState.GameWon;
+            return;
+        }
+        this.currentWave = levelConfig[this.currentWaveIndex];
+        this.enemies = [];
+        this.totalEnemiesThisWave = this.currentWave.isBossWave
+            ? 1
+            : this.currentWave.enemies.reduce((sum, enemyConf) => sum + enemyConf.count, 0);
+        this.enemiesSpawnedThisWave = 0;
+        this.enemySpawnTimer = 0;
+        this.gameState = GameState.Running;
+        
+        const isNewLevelStart = this.currentWave.waveInLevel === 1;
+        this.audioManager.playBackgroundMusic(isNewLevelStart); 
+
+        console.log(`Starting Level ${this.currentWave.levelNumber} - Wave ${this.currentWave.waveInLevel}`);
+        if (!this.currentWave.isBossWave) {
+             console.log(`Enemies to spawn: ${this.totalEnemiesThisWave}, Interval: ${this.currentWave.spawnInterval}s`);
+        }
+        if (this.currentWave.isBossWave && this.currentWave.bossType) {
+            this.spawnBoss(this.currentWave.bossType);
+        } else if (this.totalEnemiesThisWave === 0 && !this.currentWave.isBossWave) {
+             console.warn(`Level ${this.currentWave.levelNumber} Wave ${this.currentWave.waveInLevel} has no enemies. Prep next.`);
+             this.prepareForNextSequence(); 
+        }
+        this.logGameState("After Starting Wave");
+    }
+    // *** END RESTORED METHODS ***
 }
 
+// --- Global Setup --- 
+let currentGame: Game | null = null;
+
 window.addEventListener('DOMContentLoaded', () => {
-    const game = new Game();
-    game.start().catch(err => {
-        console.error("Error starting game:", err);
+    if ((window as any).__GAME_INITIALIZED__) {
+        console.warn("Game already initialized. Skipping duplicate initialization.");
+        return;
+    }
+    (window as any).__GAME_INITIALIZED__ = true;
+    console.log("%cDOM Content Loaded - Creating Game Instance...", 'color: green; font-weight: bold;');
+    
+    // Create instance (constructor sets up canvas, managers, listeners)
+    currentGame = new Game();
+    (window as any).currentGame = currentGame; 
+
+    // Start loading assets and initializing background/player
+    // This will automatically start the background animation loop once done.
+    console.log("Initiating initial asset load...");
+    currentGame.startInitialLoad().catch(err => {
+         console.error("Error during initial load:", err);
+         // Handle critical loading failure - maybe display error on canvas
     });
-}); 
+});

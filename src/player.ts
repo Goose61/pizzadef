@@ -1,6 +1,15 @@
 import { AudioManager } from './audio';
 import { Projectile } from './projectile';
 import { AssetManager } from './assetManager';
+import { GameState } from './game'; // Assuming GameState is exported from game.ts
+import { ItemType } from './items'; // Assuming ItemType is needed if you handle drops here
+
+// Import GameState enum (assuming it's exported from game.ts or a shared types file)
+// If game.ts doesn't export it, we might need to move the enum to a separate file.
+// For now, let's assume it can be imported or is globally available (less ideal).
+// If GameState is defined in game.ts and not exported, this import won't work directly.
+// We might need to declare it locally or pass the state as a string/number.
+// Let's try declaring it locally for now as a workaround.
 
 // Enum for different pizza ship types
 export enum PizzaType {
@@ -32,9 +41,11 @@ export class Player {
     private canvas: HTMLCanvasElement;
     private audioManager: AudioManager;
     private assetManager: AssetManager;
-    private isDragging: boolean = false;
+    public isDragging: boolean = false;
     private shootCooldown: number = 0;
+    private readonly FIRE_SOUND_INTERVAL: number = 0.1; // This constant is now unused
     private createProjectileCallback: (x: number, y: number, angle: number, damage?: number) => void;
+    private updateScoreCallback: (change: number) => void; // <<< ADDED CALLBACK
     
     // Player stats
     private stats: PlayerStats = {
@@ -59,6 +70,22 @@ export class Player {
     
     // Passive regen tracking
     private timeSinceLastRegen: number = 0;
+    private readonly REGEN_INTERVAL: number = 2; // seconds
+    private readonly REGEN_AMOUNT: number = 1; // HP per interval
+
+    // Store the last known game state to pass to shoot()
+    private currentGameState: GameState = GameState.Loading; 
+
+    private listenersAdded: boolean = false; // Flag to ensure listeners are added only once
+    
+    // --- Store bound event handlers for proper removal ---
+    private boundHandleTouchStart: (event: TouchEvent) => void;
+    private boundHandleTouchMove: (event: TouchEvent) => void;
+    private boundHandleTouchEnd: () => void;
+    private boundHandleMouseDown: (event: MouseEvent) => void;
+    private boundHandleMouseMove: (event: MouseEvent) => void;
+    private boundHandleMouseUp: () => void;
+    // --------------------------------------------------
 
     constructor(
         x: number,
@@ -66,14 +93,20 @@ export class Player {
         canvas: HTMLCanvasElement,
         audioManager: AudioManager,
         assetManager: AssetManager,
-        createProjectileCallback: (x: number, y: number, angle: number, damage?: number) => void
+        createProjectileCallback: (x: number, y: number, angle: number, damage?: number) => void,
+        updateScoreCallback: (change: number) => void // <<< ADDED PARAMETER
     ) {
+        // --- ADD CONSTRUCTOR LOG ---
+        const timestamp = performance.now();
+        console.log(`%cPLAYER CONSTRUCTOR CALLED at ${timestamp.toFixed(2)}ms`, 'color: yellow; font-weight: bold;');
+        // ---------------------------
         this.x = x;
         this.y = y;
         this.canvas = canvas;
         this.audioManager = audioManager;
         this.assetManager = assetManager;
         this.createProjectileCallback = createProjectileCallback;
+        this.updateScoreCallback = updateScoreCallback; // <<< STORE CALLBACK
 
         // Initialize base stats
         this.baseFireRate = this.stats.fireRate;
@@ -82,6 +115,16 @@ export class Player {
 
         this.maxHp = this.stats.maxHp;
         this.hp = this.maxHp;
+        
+        // --- Bind handlers in constructor ---
+        this.boundHandleTouchStart = this.handleTouchStart.bind(this);
+        this.boundHandleTouchMove = this.handleTouchMove.bind(this);
+        this.boundHandleTouchEnd = this.handleTouchEnd.bind(this);
+        this.boundHandleMouseDown = this.handleMouseDown.bind(this);
+        this.boundHandleMouseMove = this.handleMouseMove.bind(this);
+        this.boundHandleMouseUp = this.handleMouseUp.bind(this);
+        // ----------------------------------
+        
         this.addEventListeners();
         this.loadShipImage(); // Load initial ship image
     }
@@ -156,17 +199,27 @@ export class Player {
         return this.baseMaxHp;
     }
 
-    private addEventListeners(): void {
-        // Touch events for dragging
-        this.canvas.addEventListener('touchstart', this.handleTouchStart.bind(this), { passive: false });
-        this.canvas.addEventListener('touchmove', this.handleTouchMove.bind(this), { passive: false });
-        this.canvas.addEventListener('touchend', this.handleTouchEnd.bind(this));
+    public addEventListeners(): void {
+        // --- ADD GUARD ---
+        if (this.listenersAdded) {
+            console.warn("Attempted to add Player event listeners when already added. Skipping.");
+            return;
+        }
+        this.listenersAdded = true;
+        console.log("Adding Player event listeners...");
+        const timestamp = new Date().toLocaleTimeString();
+        console.log(`   - Listeners added at: ${timestamp}`);
+        
+        // --- Use bound handlers ---
+        this.canvas.addEventListener('touchstart', this.boundHandleTouchStart, { passive: false });
+        this.canvas.addEventListener('touchmove', this.boundHandleTouchMove, { passive: false });
+        this.canvas.addEventListener('touchend', this.boundHandleTouchEnd);
 
-        // Mouse events for dragging (for testing on desktop)
-        this.canvas.addEventListener('mousedown', this.handleMouseDown.bind(this));
-        this.canvas.addEventListener('mousemove', this.handleMouseMove.bind(this));
-        this.canvas.addEventListener('mouseup', this.handleMouseUp.bind(this));
-        this.canvas.addEventListener('mouseleave', this.handleMouseUp.bind(this)); // Stop dragging if mouse leaves canvas
+        this.canvas.addEventListener('mousedown', this.boundHandleMouseDown);
+        this.canvas.addEventListener('mousemove', this.boundHandleMouseMove);
+        this.canvas.addEventListener('mouseup', this.boundHandleMouseUp);
+        this.canvas.addEventListener('mouseleave', this.boundHandleMouseUp); // Also use bound mouse up
+        // --------------------------
     }
 
     // --- Touch Event Handlers ---
@@ -236,91 +289,70 @@ export class Player {
     }
 
     // Update method: handle shooting and temporary boosts
-    update(deltaTime: number): void {
-         // Hit flash timer
+    update(deltaTime: number, gameState: GameState): void {
+        // Update the internal game state tracking
+        this.currentGameState = gameState;
+
+        // Update timers
+        if (this.shootCooldown > 0) {
+            this.shootCooldown -= deltaTime;
+        }
         if (this.hitTimer > 0) {
             this.hitTimer -= deltaTime;
         }
-        // Ship change flash timer
         if (this.shipChangeTimer > 0) {
             this.shipChangeTimer -= deltaTime;
         }
 
-         // Automatic shooting logic
-         this.shootCooldown -= deltaTime;
-         if (this.shootCooldown <= 0) {
-             this.shoot();
-             this.shootCooldown = this.getShootInterval();
+        // Passive HP Regen (1 HP every 10 seconds)
+        this.timeSinceLastRegen += deltaTime;
+        if (this.timeSinceLastRegen >= 10) {
+            this.heal(1, false); // Heal 1 HP, don't play sound
+            this.timeSinceLastRegen = 0;
          }
 
-         // Check temporary boost expiry
-         if (this.tempFireRateBoostEndTime > 0 && Date.now() >= this.tempFireRateBoostEndTime) {
-             this.tempFireRateBoostEndTime = 0;
-             this.audioManager.playSound('boost-end'); // Changed from boost-expire
+        // Handle boost expirations
+        if (Date.now() >= this.tempFireRateBoostEndTime && this.tempFireRateBoostEndTime !== 0) {
+            this.tempFireRateBoostEndTime = 0; // Reset boost time
+            this.audioManager.playSound('boost-expire'); // Play expiration sound
              console.log("Fire rate boost expired");
          }
-         if (this.tempDamageBoostEndTime > 0 && Date.now() >= this.tempDamageBoostEndTime) {
-             this.tempDamageBoostEndTime = 0;
-             this.audioManager.playSound('boost-end'); // Changed from boost-expire
+        if (Date.now() >= this.tempDamageBoostEndTime && this.tempDamageBoostEndTime !== 0) {
+            this.tempDamageBoostEndTime = 0; // Reset boost time
+            this.audioManager.playSound('boost-expire'); // Play expiration sound
              console.log("Damage boost expired");
          }
          
-         // Passive Regen for Vegetarian
-         if (this.shipType === PizzaType.Vegetarian && this.isAlive() && this.hp < this.maxHp) {
-             this.timeSinceLastRegen += deltaTime;
-             if (this.timeSinceLastRegen >= 1.0) { // Regenerate every 1 second
-                 const regenAmount = 0.1; // Heal 0.1 HP per second
-                 this.heal(regenAmount, false); // Heal without sound
-                 this.timeSinceLastRegen = 0;
-             }
-         } else {
-              this.timeSinceLastRegen = 0; // Reset timer if not applicable
+        // Automatic shooting logic
+        if (this.shootCooldown <= 0 && this.isDragging && this.currentGameState === GameState.Running) {
+            this.shoot();
+            this.shootCooldown = this.getShootInterval(); // Reset cooldown based on current fire rate
          }
+
+        // Vegetarian passive regen only when game is running
+        if (this.shipType === PizzaType.Vegetarian && this.currentGameState === GameState.Running && this.hp < this.maxHp) {
+            this.timeSinceLastRegen += deltaTime;
+            if (this.timeSinceLastRegen >= this.REGEN_INTERVAL) {
+                this.heal(this.REGEN_AMOUNT, false); // Heal without playing sound
+                this.timeSinceLastRegen = 0;
+            }
+        }
     }
 
-    // Modified shoot method for different pizza types
+    // Method to handle shooting
     shoot(): void {
+        // No need to check gameState here anymore, it's checked in update()
+        const damage = this.getProjectileDamage(); // Use method to get potentially boosted damage
+
+        // Center projectile start position
         const projectileX = this.x;
-        const projectileY = this.y - this.height / 2; // Tip of the pizza
-        const baseAngle = -Math.PI / 2; // Straight up
-        const currentDamage = this.getProjectileDamage(); // Base damage including boosts
-
-        switch (this.shipType) {
-            case PizzaType.Pepperoni:
-                // 15% chance for +1 damage ("hot" projectile)
-                const bonusDamage = Math.random() < 0.15 ? 1 : 0;
-                this.createProjectileCallback(projectileX, projectileY, baseAngle, currentDamage + bonusDamage);
-                break;
-                
-            case PizzaType.Hawaiian:
-                // Shoots two projectiles in a narrow V
-                const spreadAngle = Math.PI / 32; // Small angle
-                this.createProjectileCallback(projectileX, projectileY, baseAngle - spreadAngle, currentDamage);
-                this.createProjectileCallback(projectileX, projectileY, baseAngle + spreadAngle, currentDamage);
-                break;
-                
-            case PizzaType.Meatlovers:
-                // Base shot
-                this.createProjectileCallback(projectileX, projectileY, baseAngle, currentDamage);
-                // 10% chance for a shotgun blast (3 projectiles, wider spread, maybe less damage?)
-                if (Math.random() < 0.10) {
-                    const shotgunDamage = Math.max(1, Math.round(currentDamage * 0.5)); // Example: half damage
-                    const shotgunSpread = Math.PI / 12;
-                    this.createProjectileCallback(projectileX, projectileY, baseAngle - shotgunSpread, shotgunDamage);
-                    this.createProjectileCallback(projectileX, projectileY, baseAngle, shotgunDamage);
-                    this.createProjectileCallback(projectileX, projectileY, baseAngle + shotgunSpread, shotgunDamage);
-                }
-                break;
-
-            case PizzaType.Vegetarian:
-            case PizzaType.Plain:
-            default:
-                // Standard single shot
-                this.createProjectileCallback(projectileX, projectileY, baseAngle, currentDamage);
-                break;
-        }
-
-        this.audioManager.playSound('fire'); // Changed from 'shoot'
+        const projectileY = this.y - this.height / 2;
+        
+        this.createProjectileCallback(projectileX, projectileY, -Math.PI / 2, damage); // Fire upwards
+        
+        // --- Play Fire Sound (Now directly called) ---
+        this.audioManager.playSound('fire');
+        // -------------------------------------------
     }
 
     // Draw method using the player image
@@ -392,13 +424,21 @@ export class Player {
     }
 
     takeDamage(amount: number): void {
-        this.hp -= amount;
+        // Decrease HP by the actual damage amount
+        const actualDamage = Math.min(amount, this.hp); // Don't subtract more than current HP
+        this.hp -= actualDamage;
         this.hitTimer = this.hitDuration; // Activate hit flash
+        
+        // Call the score update callback for each point of damage taken
+        if (actualDamage > 0) {
+             this.updateScoreCallback(-Math.floor(actualDamage)); // <<< CALL SCORE CALLBACK (negative)
+        }
+
         if (this.hp < 0) {
             this.hp = 0;
         }
-        this.audioManager.playSound('player-hit'); // Correct name
-        console.log(`Player took ${amount} damage, ${this.hp}/${this.maxHp} HP left`);
+        this.audioManager.playSound('player-hit');
+        console.log(`Player took ${actualDamage} damage, ${this.hp}/${this.maxHp} HP left`);
     }
     
     // Added optional playSound parameter to avoid sound during passive regen
@@ -483,5 +523,57 @@ export class Player {
         this.tempDamageBoostEndTime = Date.now() + durationSeconds * 1000;
         this.audioManager.playSound('power-up'); // Changed from boost-activate
         console.log(`Damage boost activated for ${durationSeconds} seconds!`);
+    }
+
+    // --- Change to public --- //
+    public removeEventListeners(): void {
+        if (!this.listenersAdded) return; // Don't try to remove if not added
+        console.log("Removing Player event listeners...");
+        
+        // --- Remove using the stored bound handlers ---
+        this.canvas.removeEventListener('touchstart', this.boundHandleTouchStart);
+        this.canvas.removeEventListener('touchmove', this.boundHandleTouchMove);
+        this.canvas.removeEventListener('touchend', this.boundHandleTouchEnd);
+
+        this.canvas.removeEventListener('mousedown', this.boundHandleMouseDown);
+        this.canvas.removeEventListener('mousemove', this.boundHandleMouseMove);
+        this.canvas.removeEventListener('mouseup', this.boundHandleMouseUp);
+        this.canvas.removeEventListener('mouseleave', this.boundHandleMouseUp);
+        // --------------------------------------------
+        
+        // TEMPORARY LOG: Indicate that proper removal needs refactoring
+        // console.warn("Player.removeEventListeners called, but proper removal requires refactoring addEventListeners to store bound handlers.");
+        
+        this.listenersAdded = false; // Mark listeners as removed
+    }
+    // --- END removeEventListeners Method --- //
+
+    // --- Add a reset method ---
+    public resetState(): void {
+        this.isDragging = false;
+        this.shootCooldown = 0;
+        this.hitTimer = 0;
+        this.shipChangeTimer = 0;
+        this.timeSinceLastRegen = 0;
+        this.tempFireRateBoostEndTime = 0;
+        this.tempDamageBoostEndTime = 0;
+        // Don't reset listeners here, handled by Game
+    }
+    // ------------------------
+
+    // Public method to reset player state (health, position, boosts etc.)
+    public reset(): void {
+        console.log("Resetting Player state...");
+        this.hp = this.getEffectiveMaxHp(); // Reset to current max HP
+        this.x = this.canvas.width / 2;
+        this.y = this.canvas.height - 60;
+        this.changeShip(PizzaType.Plain); // Reset to default ship
+        this.tempFireRateBoostEndTime = 0; // Clear boosts
+        this.tempDamageBoostEndTime = 0;
+        this.shootCooldown = 0;
+        this.isDragging = false;
+        this.timeSinceLastRegen = 0;
+        this.hitTimer = 0;
+        // Note: Base stats (baseFireRate, etc.) are NOT reset here, only by upgrades/new game.
     }
 } 
