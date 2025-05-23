@@ -141,11 +141,11 @@ process.on('unhandledRejection', (reason, promise) => {
 
 // Start server
 console.log('🚀 Starting Express server...');
-const server = app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, '::', () => {
   const startupTime = Date.now() - startTime;
   console.log(`🚀 Pizza Game server running on port ${PORT}`);
   console.log(`📊 Leaderboard data will be stored in: ${dataDir}`);
-  console.log(`🌐 Access your game at: http://localhost:${PORT}`);
+  console.log(`🌐 Server listening on IPv6 host :: (Railway v2 runtime compatible)`);
   console.log(`🏥 Health check available at: http://localhost:${PORT}/health`);
   console.log(`⏱️ Server startup completed in ${startupTime}ms`);
   console.log('✅ Server startup complete!');
