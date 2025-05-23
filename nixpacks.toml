@@ -8,7 +8,7 @@ cmds = ['npm ci']
 cmds = ['npm run railway-build']
 
 [start]
-cmd = 'npm run railway-start-debug'
+cmd = 'npm run railway-start'
 
 [variables]
 NODE_ENV = 'production' 
