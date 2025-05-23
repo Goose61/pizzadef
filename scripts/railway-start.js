@@ -3,48 +3,10 @@ const fs = require('fs');
 const path = require('path');
 
 console.log('🚀 Railway Pizza Game Startup Script');
-console.log('📋 Performing pre-startup checks...');
+console.log('📋 Performing minimal pre-startup checks...');
 console.log('🌐 Environment:', process.env.NODE_ENV || 'development');
 console.log('🔧 Port:', process.env.PORT || '3000');
 console.log('📁 Working directory:', process.cwd());
-
-// Check if dist directory exists
-const distDir = path.join(__dirname, '../dist');
-console.log('🔍 Checking dist directory:', distDir);
-if (!fs.existsSync(distDir)) {
-  console.error('❌ Dist directory not found. Build may have failed.');
-  console.error('📁 Available directories:', fs.readdirSync(path.join(__dirname, '..')));
-  process.exit(1);
-}
-console.log('✅ Dist directory found');
-
-// Check if index.html exists
-const indexPath = path.join(distDir, 'index.html');
-console.log('🔍 Checking index.html:', indexPath);
-if (!fs.existsSync(indexPath)) {
-  console.error('❌ index.html not found in dist directory.');
-  console.error('📁 Dist contents:', fs.readdirSync(distDir));
-  process.exit(1);
-}
-console.log('✅ index.html found');
-
-// Check if API files exist
-const apiDir = path.join(__dirname, '../pages/api');
-console.log('🔍 Checking API directory:', apiDir);
-if (!fs.existsSync(apiDir)) {
-  console.error('❌ API directory not found.');
-  console.error('📁 Available directories:', fs.readdirSync(path.join(__dirname, '..')));
-  process.exit(1);
-}
-console.log('✅ API directory found');
-
-// List API files
-try {
-  const apiFiles = fs.readdirSync(apiDir);
-  console.log('📄 API files found:', apiFiles);
-} catch (error) {
-  console.error('❌ Error reading API directory:', error);
-}
 
 // Ensure public directory exists
 const publicDir = path.join(__dirname, '../public');
