@@ -1,10 +1,11 @@
 const path = require('path');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const CopyWebpackPlugin = require('copy-webpack-plugin');
+const fs = require('fs');
 
 module.exports = {
   entry: './src/game.ts', // Entry point of your application
-  mode: 'development', // Or 'production'
+  mode: process.env.NODE_ENV === 'production' ? 'production' : 'development',
   module: {
     rules: [
       {
@@ -34,7 +35,8 @@ module.exports = {
         { from: 'leaderboard.html', to: 'leaderboard.html' }, // Copy leaderboard.html
         { from: 'leaderboard.css', to: 'leaderboard.css' }, // Copy leaderboard.css
         { from: 'assets', to: 'assets' }, // Copy assets folder
-        { from: 'public', to: '' }, // Copy all public files to root of dist
+        // Only copy public directory if it exists
+        ...(fs.existsSync('public') ? [{ from: 'public', to: '' }] : []),
         { from: 'src/leaderboard.js', to: 'leaderboard.js' } // Copy leaderboard.js
       ]
     })

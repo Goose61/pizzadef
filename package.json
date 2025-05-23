@@ -9,7 +9,7 @@
     "api": "npm run dev-api",
     "dev-api": "node scripts/api-server.js",
     "vercel-build": "npx webpack && node scripts/copy-api.js",
-    "railway-build": "npx webpack --mode=production && node scripts/copy-api.js",
+    "railway-build": "node scripts/ensure-dirs.js && npx webpack --mode=production && node scripts/copy-api.js",
     "railway-start": "node scripts/railway-server.js",
     "railway-build-safe": "npm install webpack webpack-cli --no-save && npm run railway-build"
   },

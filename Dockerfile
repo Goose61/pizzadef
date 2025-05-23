@@ -13,6 +13,12 @@ RUN npm ci
 # Copy the rest of the application code
 COPY . .
 
+# Create public directory if it doesn't exist
+RUN mkdir -p public
+
+# Set production environment for webpack
+ENV NODE_ENV=production
+
 # Build the application
 RUN npm run railway-build
 
