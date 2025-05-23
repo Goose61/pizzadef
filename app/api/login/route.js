@@ -1,6 +1,5 @@
-// Placeholder for /api/login
-
 import { kv } from '@vercel/kv';
+import { NextResponse } from 'next/server';
 
 // Define the keys for our KV data (same as other APIs)
 const LEADERBOARD_KEY = 'leaderboard:scores'; // Sorted Set: userId -> score
@@ -9,17 +8,17 @@ const GAMES_PLAYED_KEY = 'leaderboard:games_played'; // Hash: userId -> games_pl
 const HIGHEST_WAVE_KEY = 'leaderboard:highest_wave'; // Hash: userId -> highest_wave
 const LAST_PLAYED_KEY = 'leaderboard:last_played'; // Hash: userId -> timestamp
 
-export default async function handler(request, response) {
-  if (request.method !== 'POST') {
-    return response.status(405).json({ message: 'Method Not Allowed' });
-  }
-
+export async function POST(request) {
   try {
-    const { userId, username } = request.body;
+    const body = await request.json();
+    const { userId, username } = body;
     console.log(`Received login request for userId=${userId}, username=${username}`);
 
     if (!userId || !username) {
-      return response.status(400).json({ message: 'Missing userId or username' });
+      return NextResponse.json(
+        { message: 'Missing userId or username' }, 
+        { status: 400 }
+      );
     }
 
     // Ensure userId is a string
@@ -96,9 +95,12 @@ export default async function handler(request, response) {
     };
     
     console.log(`Login successful for ${username} (${userIdStr}): ${isNewUser ? 'New user' : 'Existing user'}`);
-    return response.status(isNewUser ? 201 : 200).json(responseData);
+    return NextResponse.json(responseData, { status: isNewUser ? 201 : 200 });
   } catch (error) {
     console.error('Error in /api/login:', error);
-    return response.status(500).json({ message: 'Internal Server Error', error: error.message });
+    return NextResponse.json(
+      { message: 'Internal Server Error', error: error.message },
+      { status: 500 }
+    );
   }
 } 

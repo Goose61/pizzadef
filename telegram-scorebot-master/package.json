@@ -1,0 +1,22 @@
+{
+  "name": "telegram-scorebot",
+  "version": "0.1.0",
+  "description": "A telegram bot to keep track of score",
+  "main": "app.js",
+  "author": "Lukas Klinger <lukas.klinger@gmail.com> (https://lukasklinger.com)",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "lowdb": "*",
+    "telebot": "^1.4.1"
+  },
+  "repository": {
+    "url": "https://git.lukasklinger.com/lukas/telegram-scorebot"
+  },
+  "license": "MIT",
+  "keywords": [
+    "node",
+    "telegram"
+  ]
+}

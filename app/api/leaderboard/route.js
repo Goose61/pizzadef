@@ -1,4 +1,5 @@
 import { kv } from '@vercel/kv';
+import { NextResponse } from 'next/server';
 
 // Define the keys for our KV data (same as submit-score)
 const LEADERBOARD_KEY = 'leaderboard:scores'; // Sorted Set: userId -> score
@@ -7,16 +8,17 @@ const GAMES_PLAYED_KEY = 'leaderboard:games_played'; // Hash: userId -> games_pl
 const HIGHEST_WAVE_KEY = 'leaderboard:highest_wave'; // Hash: userId -> highest_wave
 const LAST_PLAYED_KEY = 'leaderboard:last_played'; // Hash: userId -> timestamp
 
-export default async function handler(request, response) {
-  if (request.method !== 'GET') {
-    return response.status(405).json({ message: 'Method Not Allowed' });
-  }
-
+export async function GET(request) {
   try {
-    // Optional query parameters for filtering and pagination
-    const count = request.query.count ? parseInt(request.query.count, 10) : 100;
-    const offset = request.query.offset ? parseInt(request.query.offset, 10) : 0;
-    const period = request.query.period || 'all'; // all, day, week, month
+    // Get URL parameters
+    const url = new URL(request.url);
+    const countParam = url.searchParams.get('count');
+    const offsetParam = url.searchParams.get('offset');
+    const period = url.searchParams.get('period') || 'all'; // all, day, week, month
+    
+    // Parse parameters
+    const count = countParam ? parseInt(countParam, 10) : 100;
+    const offset = offsetParam ? parseInt(offsetParam, 10) : 0;
 
     console.log(`Fetching leaderboard with params: count=${count}, offset=${offset}, period=${period}`);
 
@@ -49,7 +51,7 @@ export default async function handler(request, response) {
       console.log(`Found ${lastPlayedData ? Object.keys(lastPlayedData).length : 0} users with last played data`);
       
       if (!lastPlayedData) {
-        return response.status(200).json({ 
+        return NextResponse.json({ 
           entries: [],
           total: 0,
           period
@@ -64,7 +66,7 @@ export default async function handler(request, response) {
       console.log(`Found ${recentUsers.length} users who played in the ${period} period`);
       
       if (recentUsers.length === 0) {
-        return response.status(200).json({ 
+        return NextResponse.json({ 
           entries: [],
           total: 0,
           period
@@ -96,7 +98,7 @@ export default async function handler(request, response) {
       
       if (!leaderboardEntries) {
         console.log('No leaderboard entries found');
-        return response.status(200).json({ 
+        return NextResponse.json({ 
           entries: [],
           total: 0,
           period
@@ -118,7 +120,7 @@ export default async function handler(request, response) {
     
     // If no entries, return empty array
     if (leaderboardEntries.length === 0) {
-      return response.status(200).json({ 
+      return NextResponse.json({ 
         entries: [],
         total: await kv.zcard(LEADERBOARD_KEY),
         period
@@ -155,13 +157,16 @@ export default async function handler(request, response) {
 
     // Return the leaderboard data
     console.log(`Successfully returning ${entries.length} entries out of ${total} total`);
-    return response.status(200).json({ 
+    return NextResponse.json({ 
       entries,
       total,
       period
     });
   } catch (error) {
     console.error('Error fetching leaderboard:', error);
-    return response.status(500).json({ message: 'Internal Server Error' });
+    return NextResponse.json(
+      { message: 'Internal Server Error' },
+      { status: 500 }
+    );
   }
 } 

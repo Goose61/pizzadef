@@ -10,14 +10,46 @@
     max-width: 500px;
     max-height: 80vh;
     overflow-y: auto; /* Allow scrolling if list is long */
+    position: relative; /* Ensure positioning context for z-index */
 }
 
 #leaderboardContainer h1 {
-    margin-bottom: 15px;
+    margin-bottom: 10px;
     font-size: 2em;
     color: #ff8c00; /* Highlight color */
 }
 
+/* Leaderboard Filters */
+.leaderboard-filters {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    margin-bottom: 15px;
+    padding: 0 5px;
+}
+
+#period-filter {
+    padding: 5px 10px;
+    border-radius: 5px;
+    border: 1px solid #444;
+    background-color: #333;
+    color: #eee;
+    font-size: 0.9em;
+}
+
+.toggle-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #eee;
+    font-size: 0.9em;
+}
+
+#show-inactive {
+    accent-color: #ff8c00;
+}
+
+/* Leaderboard List */
 #leaderboardList {
     list-style: none;
     padding: 0;
@@ -31,16 +63,42 @@
     padding: 10px 15px;
     border-bottom: 1px solid #444;
     font-size: 1.1em;
+    align-items: center;
 }
 
 #leaderboardList li:last-child {
     border-bottom: none;
 }
 
+/* Header Row */
+#leaderboardList .header-row {
+    color: #aaa;
+    font-size: 0.9em;
+    font-weight: bold;
+    background-color: rgba(0, 0, 0, 0.3);
+    border-radius: 5px 5px 0 0;
+    text-transform: uppercase;
+}
+
+/* Top 3 Players */
+#leaderboardList .top-1 {
+    background-color: rgba(255, 215, 0, 0.15); /* Gold */
+}
+
+#leaderboardList .top-2 {
+    background-color: rgba(192, 192, 192, 0.15); /* Silver */
+}
+
+#leaderboardList .top-3 {
+    background-color: rgba(205, 127, 50, 0.15); /* Bronze */
+}
+
+/* Leaderboard Columns */
 #leaderboardList .rank {
     font-weight: bold;
     color: #aaa;
     min-width: 30px; /* Ensure alignment */
+    text-align: center;
 }
 
 #leaderboardList .name {
@@ -56,11 +114,43 @@
 #leaderboardList .score {
     font-weight: bold;
     color: #ffcc00; /* Score color */
+    min-width: 60px;
+    text-align: right;
+    margin-right: 10px;
 }
 
+#leaderboardList .stats {
+    display: flex;
+    gap: 15px;
+    min-width: 80px;
+    text-align: center;
+}
+
+#leaderboardList .wave {
+    color: #8af; /* Light blue */
+    flex: 1;
+}
+
+#leaderboardList .games {
+    color: #8d8; /* Light green */
+    flex: 1;
+}
+
+/* Messages */
 #loadingMessage {
     font-style: italic;
     color: #aaa;
+}
+
+.empty-leaderboard, .error-message {
+    text-align: center;
+    padding: 20px;
+    color: #aaa;
+    font-style: italic;
+}
+
+.error-message {
+    color: #f88;
 }
 
 #backButton {
@@ -70,11 +160,51 @@
     cursor: pointer;
     border: none;
     border-radius: 5px;
-    background-color: #555;
+    background-color: #ff6600; /* More visible orange color */
     color: white;
     transition: background-color 0.3s ease;
+    position: relative; /* Ensure it can have z-index */
+    z-index: 10; /* Place it above other elements */
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3); /* Add shadow for visibility */
 }
 
 #backButton:hover {
-    background-color: #777;
+    background-color: #ff8800;
+    transform: scale(1.05); /* Slight grow effect on hover */
+}
+
+#backButton:active {
+    background-color: #ff4400;
+    transform: scale(0.98); /* Slight press effect */
+}
+
+/* Additional debug styles */
+#backButton::before {
+    content: "";
+    position: absolute;
+    top: -10px;
+    left: -10px;
+    right: -10px;
+    bottom: -10px;
+    z-index: -1;
+    border: 2px dashed rgba(255, 0, 0, 0.5); /* Visual debugging border */
+    pointer-events: none; /* Don't interfere with clicks */
+}
+
+/* Mobile responsiveness */
+@media (max-width: 480px) {
+    #leaderboardContainer {
+        width: 95%;
+        padding: 20px 15px;
+    }
+    
+    #leaderboardList li {
+        font-size: 0.95em;
+        padding: 8px 10px;
+    }
+    
+    #leaderboardList .stats {
+        min-width: 70px;
+        gap: 10px;
+    }
 } 

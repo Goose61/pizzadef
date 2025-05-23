@@ -4,15 +4,26 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "npx webpack",
-    "start": "npx webpack serve --open"
+    "build": "npx webpack && node scripts/copy-api.js",
+    "start": "npx webpack serve --open",
+    "api": "npm run dev-api",
+    "dev-api": "node scripts/api-server.js",
+    "vercel-build": "npx webpack && node scripts/copy-api.js",
+    "railway-build": "npx webpack && node scripts/copy-api.js",
+    "railway-start": "node scripts/railway-server.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "description": "",
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  },
   "devDependencies": {
     "copy-webpack-plugin": "^13.0.0",
+    "express": "^4.18.2",
+    "fs-extra": "^11.2.0",
     "html-webpack-plugin": "^5.6.3",
     "ts-loader": "^9.5.1",
     "typescript": "^5.5.4",
@@ -21,7 +32,6 @@
     "webpack-dev-server": "^5.0.4"
   },
   "dependencies": {
-    "@vercel/kv": "^3.0.0",
-    "redis": "^4.7.0"
+    "express": "^4.18.2"
   }
 }

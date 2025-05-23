@@ -28,6 +28,61 @@ import { Item, ItemType } from './items'; // Import Item and ItemType
 import { PizzaType } from './player'; // Import PizzaType
 import { BackgroundManager } from './background'; // Import BackgroundManager
 
+// Global debug log for troubleshooting
+let debugLogs: string[] = [];
+function addDebugLog(message: string) {
+    const timestamp = new Date().toISOString().split('T')[1].split('.')[0]; // HH:MM:SS
+    debugLogs.push(`${timestamp}: ${message}`);
+    if (debugLogs.length > 50) debugLogs.shift(); // Keep log size manageable
+    console.log(`DEBUG: ${message}`);
+    
+    // Update debug element if it exists
+    const debugElement = document.getElementById('telegram-debug');
+    if (debugElement) {
+        debugElement.innerHTML = debugLogs.join('<br>');
+        debugElement.scrollTop = debugElement.scrollHeight;
+    }
+}
+
+// Create or get debug container
+function createDebugDisplay() {
+    let debugElement = document.getElementById('telegram-debug');
+    if (!debugElement) {
+        debugElement = document.createElement('div');
+        debugElement.id = 'telegram-debug';
+        debugElement.style.position = 'fixed';
+        debugElement.style.bottom = '10px';
+        debugElement.style.right = '10px';
+        debugElement.style.width = '300px';
+        debugElement.style.height = '200px';
+        debugElement.style.background = 'rgba(0,0,0,0.7)';
+        debugElement.style.color = '#0f0';
+        debugElement.style.padding = '10px';
+        debugElement.style.overflow = 'auto';
+        debugElement.style.fontSize = '10px';
+        debugElement.style.fontFamily = 'monospace';
+        debugElement.style.zIndex = '9999';
+        document.body.appendChild(debugElement);
+
+        // Add toggle button for debug display
+        const toggleBtn = document.createElement('button');
+        toggleBtn.textContent = 'Debug';
+        toggleBtn.style.position = 'fixed';
+        toggleBtn.style.bottom = '10px';
+        toggleBtn.style.right = '320px';
+        toggleBtn.style.zIndex = '9999';
+        toggleBtn.style.padding = '5px';
+        toggleBtn.style.background = '#333';
+        toggleBtn.style.color = '#fff';
+        toggleBtn.style.border = 'none';
+        toggleBtn.addEventListener('click', () => {
+            debugElement!.style.display = debugElement!.style.display === 'none' ? 'block' : 'none';
+        });
+        document.body.appendChild(toggleBtn);
+    }
+    return debugElement;
+}
+
 // Export GameState enum
 export enum GameState {
     Menu, // NEW: Initial state showing the menu
@@ -159,23 +214,45 @@ class Game {
     
     private initializeTelegram(): void {
         const telegramObj = window as any;
+        addDebugLog("Initializing Telegram WebApp integration...");
+        
+        createDebugDisplay(); // Create debug container
+        
         if (telegramObj.Telegram && telegramObj.Telegram.WebApp) {
             const tg = telegramObj.Telegram.WebApp;
             tg.ready();
             tg.expand();
-             console.log("Telegram Web App SDK initialized.");
+            addDebugLog("Telegram Web App SDK initialized.");
+            
             // Get user info - might be null initially
             if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
                 this.userId = tg.initDataUnsafe.user.id;
-                this.username = tg.initDataUnsafe.user.username || 
-                                 `${tg.initDataUnsafe.user.first_name}${tg.initDataUnsafe.user.last_name ? ' ' + tg.initDataUnsafe.user.last_name : ''}`.trim() || 
-                                 `user_${this.userId}`;
-                console.log(`User info available: ${this.username} (ID: ${this.userId})`);
+                const firstName = tg.initDataUnsafe.user.first_name || '';
+                const lastName = tg.initDataUnsafe.user.last_name || '';
+                const username = tg.initDataUnsafe.user.username || '';
+                
+                addDebugLog(`Raw Telegram user data: id=${this.userId}, first=${firstName}, last=${lastName}, username=${username}`);
+                
+                // Build username with fallbacks
+                this.username = username || 
+                               `${firstName}${lastName ? ' ' + lastName : ''}`.trim() || 
+                               `user_${this.userId}`;
+                
+                addDebugLog(`User info available: ${this.username} (ID: ${this.userId})`);
             } else {
-                console.warn("Telegram user info not immediately available.");
+                addDebugLog("Telegram user info not immediately available.");
+                try {
+                    addDebugLog("initDataUnsafe content: " + JSON.stringify(telegramObj.Telegram.WebApp.initDataUnsafe || {}));
+                } catch (e) {
+                    addDebugLog("Error stringifying initDataUnsafe: " + e);
+                }
             }
         } else {
-             console.error("Telegram SDK not found.");
+            addDebugLog("Telegram SDK not found or incomplete.");
+            addDebugLog("window.Telegram exists: " + !!telegramObj.Telegram);
+            if (telegramObj.Telegram) {
+                addDebugLog("window.Telegram.WebApp exists: " + !!telegramObj.Telegram.WebApp);
+            }
         }
     }
     
@@ -788,51 +865,78 @@ class Game {
     
     // --- Send Score to Backend --- 
     private async sendScoreToBackend(): Promise<void> {
+        addDebugLog("Preparing to send score to backend...");
+        addDebugLog(`User info check - Username: ${this.username}, UserId: ${this.userId}`);
+        
         if (!this.username || this.userId === null) {
-            console.warn("Cannot send score: User info not available.");
-            return;
+            addDebugLog("Cannot send score: User info not available. Attempting final fallback...");
+            
+            // Last attempt to get Telegram data
+            const telegramObj = window as any;
+            if (telegramObj.Telegram?.WebApp?.initDataUnsafe?.user) {
+                this.userId = telegramObj.Telegram.WebApp.initDataUnsafe.user.id;
+                this.username = telegramObj.Telegram.WebApp.initDataUnsafe.user.username || 
+                              `${telegramObj.Telegram.WebApp.initDataUnsafe.user.first_name || ''} ${telegramObj.Telegram.WebApp.initDataUnsafe.user.last_name || ''}`.trim() ||
+                              `player_${this.userId}`;
+                addDebugLog(`Last-minute user data retrieved: ${this.username} (${this.userId})`);
+            } else {
+                // Create a fallback anonymous user if we still don't have data
+                this.userId = Math.floor(Math.random() * 1000000) + 100000;
+                this.username = `anonymous_${this.userId}`;
+                addDebugLog(`Created fallback anonymous user: ${this.username} (${this.userId})`);
+            }
         }
 
         if (this.score <= 0) {
-            console.log("Score is 0, not sending to backend.");
+            addDebugLog("Score is 0, not sending to backend.");
             return;
         }
 
-        console.log(`Sending score ${this.score} for user ${this.username} (ID: ${this.userId}) to backend...`);
+        addDebugLog(`Sending score ${this.score} for user ${this.username} (ID: ${this.userId}) to backend...`);
 
         try {
-            const response = await fetch('/api/submit-score', {
+            const payload = { 
+                username: this.username,
+                userId: this.userId,
+                score: this.score,
+                wave: this.currentWaveIndex + 1 // Add the current wave for tracking
+            };
+            
+            addDebugLog("Full payload: " + JSON.stringify(payload));
+            
+            const response = await fetch('/api/simple-submit', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ 
-                    username: this.username,
-                    userId: this.userId, // Send userId as well for potential future use
-                    score: this.score 
-                }),
+                body: JSON.stringify(payload),
             });
 
+            const responseText = await response.text();
+            
             if (!response.ok) {
-                const errorData = await response.json().catch(() => ({ message: 'Failed to parse error response' }));
-                throw new Error(`HTTP error! status: ${response.status}, message: ${errorData.message || 'Unknown error'}`);
+                addDebugLog(`HTTP error! status: ${response.status}, response: ${responseText}`);
+                return;
+            }
+            
+            try {
+                const result = JSON.parse(responseText);
+                addDebugLog("Score submission successful: " + JSON.stringify(result));
+            } catch (e) {
+                addDebugLog("Error parsing JSON response: " + e + ", raw: " + responseText);
             }
 
-            const result = await response.json();
-            console.log("Score submission successful:", result);
-
         } catch (error) {
-            console.error("Error sending score to backend:", error);
-            // Optionally, display an error message to the user on the game over screen
+            addDebugLog("Error sending score to backend: " + error);
         }
     }
     // ---------------------------
     
     // --- NEW Menu Button Handlers ---
     private handlePlayClick(): void {
-        console.log("Play button clicked");
+        addDebugLog("Play button clicked");
         if (!this.assetsLoaded || !this.player || !this.backgroundManager) {
-            console.error("Assets not loaded or components not initialized, cannot start game!");
+            addDebugLog("Assets not loaded or components not initialized, cannot start game!");
             return;
         }
         
@@ -844,19 +948,26 @@ class Game {
         
         // Perform user login fetch (moved from menu.js)
         if (this.userId !== null) {
-            console.log(`Attempting login fetch for user: ${this.username} (ID: ${this.userId})`);
-             fetch('/api/login', { 
+            addDebugLog(`Attempting login fetch for user: ${this.username} (ID: ${this.userId})`);
+             fetch('/api/simple-login', { 
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({ userId: this.userId, username: this.username }),
                 })
-                .then(response => response.json())
-                .then(data => console.log('Login response:', data))
-                .catch(error => console.error('Error logging player:', error));
+                .then(response => response.text())
+                .then(data => {
+                    try {
+                        const jsonData = JSON.parse(data);
+                        addDebugLog('Login response: ' + JSON.stringify(jsonData));
+                    } catch (e) {
+                        addDebugLog('Error parsing login response: ' + e + ', raw: ' + data);
+                    }
+                })
+                .catch(error => addDebugLog('Error logging player: ' + error));
         } else {
-            console.warn('User ID not available for login fetch.');
+            addDebugLog('User ID not available for login fetch.');
         }
 
         // Reset game state and start the first wave sequence

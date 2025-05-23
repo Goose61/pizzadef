@@ -33,7 +33,9 @@ module.exports = {
         { from: 'style.css', to: 'style.css' }, // Copy style.css
         { from: 'leaderboard.html', to: 'leaderboard.html' }, // Copy leaderboard.html
         { from: 'leaderboard.css', to: 'leaderboard.css' }, // Copy leaderboard.css
-        { from: 'assets', to: 'assets' } // Copy assets folder
+        { from: 'assets', to: 'assets' }, // Copy assets folder
+        { from: 'public', to: '' }, // Copy all public files to root of dist
+        { from: 'src/leaderboard.js', to: 'leaderboard.js' } // Copy leaderboard.js
       ]
     })
   ],
@@ -43,8 +45,14 @@ module.exports = {
       },
     compress: true,
     port: 9000, // Port for the development server
-    watchFiles: ['src/**/*', 'index.html', 'style.css'], 
-    hot: false // Ensure HMR is enabled
+    watchFiles: ['src/**/*', 'index.html', 'style.css', 'leaderboard.html', 'leaderboard.css'], 
+    hot: false, // Ensure HMR is enabled
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3000',
+        pathRewrite: { '^/api': '/api' }
+      }
+    }
   },
   watchOptions: {
     ignored: /node_modules|dist/, 

@@ -28,4 +28,13 @@ yarn-error.log*
 # OS files
 .DS_Store
 Thumbs.db 
+
+# Deployment platforms
 .vercel
+.railway
+
+# Backup files (optional - you might want to keep these)
+public/backups/
+
+# Runtime data
+public/leaderboard-data.json

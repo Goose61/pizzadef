@@ -1,6 +1,6 @@
 body {
     margin: 0;
-    overflow: hidden; /* Prevent scrollbars */
+    overflow: auto; /* Changed from hidden to allow interaction with all elements */
     position: relative; /* Needed for absolute positioning of canvas */
     background-color: #000; /* Fallback background */
     /* background-image related lines removed as canvas will handle it */
@@ -10,6 +10,14 @@ body {
     height: 100vh;
     color: white; /* Ensure text is visible on dark background */
     font-family: sans-serif; /* Basic font */
+}
+
+/* Global button styles to ensure all buttons are clickable */
+button {
+    cursor: pointer !important;
+    pointer-events: auto !important; /* Force buttons to receive pointer events */
+    position: relative;
+    z-index: 100 !important; /* Ensure buttons are always above other elements */
 }
 
 #mainMenu {
@@ -32,17 +40,32 @@ body {
 #mainMenu button {
     padding: 15px 30px;
     font-size: 1.2em;
-    cursor: pointer;
     border: none;
     border-radius: 5px;
     background-color: #ff8c00; /* Example button color */
     color: white;
     transition: background-color 0.3s ease;
-    pointer-events: auto; /* Ensure buttons receive clicks */
 }
 
 #mainMenu button:hover {
     background-color: #e07b00;
+}
+
+/* Specific styles for back button to ensure it's always clickable */
+#backButton {
+    cursor: pointer !important; 
+    pointer-events: auto !important;
+    z-index: 1000 !important; /* Very high z-index */
+    position: relative !important;
+    user-select: none; /* Prevent text selection */
+    -webkit-tap-highlight-color: rgba(0,0,0,0); /* Remove tap highlight on mobile */
+}
+
+/* Make sure containers don't block clicking */
+#leaderboardContainer {
+    z-index: 50;
+    position: relative;
+    pointer-events: auto;
 }
 
 canvas#gameCanvas { /* Target the specific canvas */

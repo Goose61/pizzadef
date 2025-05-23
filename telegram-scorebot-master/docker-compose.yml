@@ -1,0 +1,13 @@
+version: '2'
+
+services:
+  scorebot:
+    build: .
+    restart: unless-stopped
+    volumes:
+      - scorebot-data:/usr/src/app/data
+    environment:
+      - BOT_TOKEN=[insert telegram bot token here]
+
+volumes:
+  scorebot-data:

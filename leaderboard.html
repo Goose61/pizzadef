@@ -7,6 +7,23 @@
     <link rel="stylesheet" href="style.css"> <!-- Reuse main styles -->
     <link rel="stylesheet" href="leaderboard.css"> <!-- Specific leaderboard styles -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        /* Inline styles to ensure the button is visible and clickable */
+        #backButton {
+            margin-top: 20px;
+            padding: 12px 25px;
+            font-size: 1.1em;
+            cursor: pointer !important;
+            border: none;
+            border-radius: 5px;
+            background-color: #ff6600;
+            color: white;
+            position: relative;
+            z-index: 1000 !important;
+            pointer-events: auto !important;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
+        }
+    </style>
 </head>
 <body>
     <div id="leaderboardContainer">
@@ -15,8 +32,134 @@
         <ol id="leaderboardList">
             <!-- Leaderboard entries will be added here by JavaScript -->
         </ol>
-        <button id="backButton">Back to Menu</button>
+        <!-- Direct inline onclick handler as a fallback -->
+        <button id="backButton" onclick="console.log('Inline click handler'); window.location.href='index.html';" style="cursor:pointer !important;">Back to Menu</button>
     </div>
-    <script src="src/leaderboard.js"></script> <!-- Script to fetch and display data -->
+
+    <!-- Add direct keyboard navigation -->
+    <script>
+        // Direct script to handle navigation before the main scripts load
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' || e.key === 'b' || e.key === 'B') {
+                console.log('Direct keyboard navigation');
+                window.location.href = 'index.html';
+            }
+        });
+    </script>
+    
+    <script>
+        // Debug log function to help trace issues
+        function addDebugLog(message) {
+            console.log(message);
+        }
+        
+        // Immediately load leaderboard data when the page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            addDebugLog('Leaderboard page loaded, fetching data...');
+            fetchLeaderboardData();
+        });
+
+        async function fetchLeaderboardData() {
+            const leaderboardList = document.getElementById('leaderboardList');
+            const loadingMessage = document.getElementById('loadingMessage');
+            
+            if (!leaderboardList) {
+                console.error('Leaderboard list not found!');
+                return;
+            }
+
+            // Clear previous entries and show loading
+            leaderboardList.innerHTML = '';
+            if (loadingMessage) loadingMessage.style.display = 'block';
+
+            try {
+                addDebugLog('Fetching leaderboard data from API...');
+                
+                // Fetch filtered leaderboard data
+                const response = await fetch('/api/simple-leaderboard');
+                
+                addDebugLog(`API response status: ${response.status}`);
+                
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    addDebugLog(`API error response: ${errorText}`);
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const responseText = await response.text();
+                addDebugLog(`API response: ${responseText}`);
+                
+                // Try parsing the response
+                const leaderboardData = JSON.parse(responseText);
+
+                if (loadingMessage) loadingMessage.style.display = 'none';
+
+                if (leaderboardData.length === 0) {
+                    const emptyItem = document.createElement('li');
+                    emptyItem.className = 'empty-leaderboard';
+                    emptyItem.textContent = 'No scores yet. Be the first to play!';
+                    leaderboardList.appendChild(emptyItem);
+                    return;
+                }
+
+                // Create header for the leaderboard
+                const headerItem = document.createElement('li');
+                headerItem.className = 'header-row';
+                headerItem.innerHTML = `
+                    <span class="rank">#</span>
+                    <span class="name">Player</span>
+                    <span class="score">Score</span>
+                    <span class="stats">
+                        <span class="wave" title="Highest Wave Reached">Wave</span>
+                        <span class="games" title="Games Played">Games</span>
+                    </span>
+                `;
+                leaderboardList.appendChild(headerItem);
+
+                // Create entry for each player
+                leaderboardData.forEach(entry => {
+                    const listItem = document.createElement('li');
+                    
+                    // Add special class for top 3 players
+                    if (entry.rank <= 3) {
+                        listItem.className = `top-${entry.rank}`;
+                    }
+                    
+                    // Create HTML structure for the entry
+                    listItem.innerHTML = `
+                        <span class="rank">${entry.rank}</span>
+                        <span class="name">${entry.username}</span>
+                        <span class="score">${entry.score.toLocaleString()}</span>
+                        <span class="stats">
+                            <span class="wave" title="Highest Wave Reached">${entry.highestWave || 0}</span>
+                            <span class="games" title="Games Played">${entry.gamesPlayed || 0}</span>
+                        </span>
+                    `;
+                    
+                    leaderboardList.appendChild(listItem);
+                });
+
+            } catch (error) {
+                console.error('Error fetching or displaying leaderboard:', error);
+                if (loadingMessage) loadingMessage.style.display = 'none';
+                
+                const errorItem = document.createElement('li');
+                errorItem.className = 'error-message';
+                errorItem.textContent = `Could not load leaderboard data: ${error.message}`;
+                leaderboardList.appendChild(errorItem);
+            }
+        }
+
+        // Handle back button properly
+        document.addEventListener('DOMContentLoaded', function() {
+            const backButton = document.getElementById('backButton');
+            if (backButton) {
+                backButton.addEventListener('click', function() {
+                    console.log('Back button clicked via event listener');
+                    window.location.href = 'index.html';
+                });
+            }
+        });
+    </script>
 </body>
 </html> 

@@ -1,4 +1,5 @@
 import { kv } from '@vercel/kv';
+import { NextResponse } from 'next/server';
 
 // Define the keys for our KV data
 const LEADERBOARD_KEY = 'leaderboard:scores'; // Sorted Set: userId -> score
@@ -7,23 +8,27 @@ const GAMES_PLAYED_KEY = 'leaderboard:games_played'; // Hash: userId -> games_pl
 const HIGHEST_WAVE_KEY = 'leaderboard:highest_wave'; // Hash: userId -> highest_wave
 const LAST_PLAYED_KEY = 'leaderboard:last_played'; // Hash: userId -> timestamp
 
-export default async function handler(request, response) {
-  if (request.method !== 'POST') {
-    return response.status(405).json({ message: 'Method Not Allowed' });
-  }
-
+export async function POST(request) {
   try {
-    const { userId, username, score, wave = 0 } = request.body;
+    // Get request body
+    const body = await request.json();
+    const { userId, username, score, wave = 0 } = body;
 
     // Basic validation
     if (userId === undefined || userId === null || !username || typeof score !== 'number') {
-      return response.status(400).json({ message: 'Missing or invalid parameters (userId, username, score)' });
+      return NextResponse.json(
+        { message: 'Missing or invalid parameters (userId, username, score)' },
+        { status: 400 }
+      );
     }
     
     // Ensure score is an integer
     const integerScore = Math.floor(score);
     if (integerScore <= 0) {
-        return response.status(200).json({ message: 'Score is zero or negative, not recorded.' });
+      return NextResponse.json(
+        { message: 'Score is zero or negative, not recorded.' },
+        { status: 200 }
+      );
     }
 
     // Ensure wave is an integer
@@ -69,16 +74,19 @@ export default async function handler(request, response) {
     
     console.log(`Game recorded for ${username} (ID: ${userId}): Score=${integerScore}, Wave=${integerWave}, Games=${newGamesPlayed}`);
     
-    return response.status(200).json({ 
+    return NextResponse.json({ 
       message: isNewHighScore ? 'High score updated successfully!' : 'Game recorded but not a new high score.',
       newHighScore: isNewHighScore ? integerScore : null,
       currentHighScore: isNewHighScore ? integerScore : Number(currentHighScore),
       gamesPlayed: newGamesPlayed,
       highestWave: Math.max(integerWave, parseInt(currentHighestWave) || 0),
-    });
+    }, { status: 200 });
 
   } catch (error) {
     console.error('Error processing score submission:', error);
-    return response.status(500).json({ message: 'Internal Server Error processing score' });
+    return NextResponse.json(
+      { message: 'Internal Server Error processing score' },
+      { status: 500 }
+    );
   }
 } 

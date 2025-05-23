@@ -2,11 +2,35 @@
   "version": 2,
   "builds": [
     { "src": "package.json", "use": "@vercel/static-build", "config": { "distDir": "dist" } },
-    { "src": "api/**/*.js", "use": "@vercel/node" }
+    { "src": "pages/api/**/*.js", "use": "@vercel/node" }
   ],
   "routes": [
-    { "src": "/api/(.*)", "dest": "/api/$1" },
+    { 
+      "src": "/api/simple-submit", 
+      "dest": "/pages/api/simple-submit.js" 
+    },
+    { 
+      "src": "/api/simple-login", 
+      "dest": "/pages/api/simple-login.js" 
+    },
+    { 
+      "src": "/api/simple-leaderboard", 
+      "dest": "/pages/api/simple-leaderboard.js" 
+    },
+    { 
+      "src": "/api/simple-debug", 
+      "dest": "/pages/api/simple-debug.js" 
+    },
+    { 
+      "src": "/api/backup-leaderboard", 
+      "dest": "/pages/api/backup-leaderboard.js" 
+    },
     { "handle": "filesystem" },
-    { "src": "/.*", "dest": "/dist/index.html" }
-  ]
+    { "src": "/.*", "dest": "/index.html" }
+  ],
+  "functions": {
+    "pages/api/*.js": {
+      "maxDuration": 10
+    }
+  }
 } 
