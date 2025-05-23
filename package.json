@@ -13,6 +13,7 @@
     "railway-start": "node scripts/railway-start.js",
     "railway-start-direct": "node scripts/railway-server.js",
     "railway-start-debug": "node scripts/simple-server.js",
+    "railway-start-minimal": "node scripts/minimal-railway-server.js",
     "railway-build-safe": "npm install webpack webpack-cli --no-save && npm run railway-build"
   },
   "keywords": [],
